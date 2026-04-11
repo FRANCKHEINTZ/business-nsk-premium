@@ -1,273 +1,187 @@
 import React, { useState, useEffect } from 'react';
-import { initializeApp } from 'firebase/app';
 import { 
-  getAuth, 
-  signInWithCustomToken, 
-  signInAnonymously, 
-  onAuthStateChanged 
-} from 'firebase/auth';
-import { 
-  getFirestore, 
-  collection, 
-  addDoc, 
-  serverTimestamp 
-} from 'firebase/firestore';
-import { 
-  Lock, ArrowRight, Mail, User, Sparkles, Rocket, 
-  ShieldCheck, AlertCircle, Check, Star, Crown, Zap, X, ScrollText, LayoutDashboard
+  Rocket, Check, X, ArrowRight, 
+  ShieldCheck, Zap, Star, ScrollText,
+  TrendingUp, Users, Calculator, Activity, Calendar
 } from 'lucide-react';
 
-// --- CONFIGURATION FIREBASE ---
-const firebaseConfig = JSON.parse(__firebase_config);
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'business-nsk-leads';
+/**
+ * COMPOSANT UNIQUE POUR L'APERÇU
+ * Ce fichier fusionne le Layout et la Page pour que le bouton "Preview" fonctionne.
+ */
 
-export default function App() {
-  // États
-  const [formData, setFormData] = useState({ prenom: '', nom: '', email: '' });
-  const [loading, setLoading] = useState(false);
-  const [user, setUser] = useState(null);
-  const [view, setView] = useState('login'); // 'login', 'packs', ou 'dashboard'
+const App = () => {
+  const [mounted, setMounted] = useState(false);
+  const [view, setView] = useState('login'); 
   const [selectedPack, setSelectedPack] = useState(null);
-  const [errorMsg, setErrorMsg] = useState(null);
   const [legalModal, setLegalModal] = useState(null);
   const [isAnnual, setIsAnnual] = useState(false);
+  const [loading, setLoading] = useState(false);
 
-  // --- CONFIGURATION DES APPLICATIONS ---
-  const applications = [
-    { id: 1, name: "Gestionnaire Clientèle", file: "app1.html", pack: "starter" },
-    { id: 2, name: "Suivi de Réseau", file: "app2.html", pack: "starter" },
-    { id: 3, name: "Analyse de Performance", file: "app3.html", pack: "starter" },
-    { id: 4, name: "Planificateur de Succès", file: "app4.html", pack: "business" },
-    { id: 5, name: "Tableau de Bord Détaillé", file: "app5.html", pack: "business" },
-    { id: 6, name: "Calculateur de Commissions", file: "app6.html", pack: "performance" },
-  ];
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
-  // --- LIENS DE PAIEMENT ---
-  const links = {
-    starter_m: "https://business-nsk.lemonsqueezy.com/checkout/buy/ed733f72-4562-4e93-8594-a3bdd319f5b3", 
-    starter_a: "https://business-nsk.lemonsqueezy.com/checkout/buy/3e40bab0-a707-429e-9424-fd0d6b0de81e", 
+  if (!mounted) return null;
+
+  const checkoutLinks = {
+    starter_m: "https://business-nsk.lemonsqueezy.com/checkout/buy/ed733f72-4562-4e93-8594-a3bdd319f5b3",
+    starter_a: "https://business-nsk.lemonsqueezy.com/checkout/buy/3e40bab0-a707-429e-9424-fd0d6b0de81e",
     business_m: "https://business-nsk.lemonsqueezy.com/checkout/buy/910988d0-26a5-4a5d-b4c7-a29dd3302b12",
     business_a: "https://business-nsk.lemonsqueezy.com/checkout/buy/2ad67cb8-485b-48a7-b089-1f13a4a871e8",
     performance_m: "https://business-nsk.lemonsqueezy.com/checkout/buy/7fdb7200-82ff-48c7-b28b-a69ed2a87dc3",
     performance_a: "https://business-nsk.lemonsqueezy.com/checkout/buy/8b1ed304-f6a6-4b65-8f8d-fb1011109bad",
   };
 
-  const packs = [
-    {
-      id: 'starter',
-      name: 'STARTER',
-      icon: <Zap className="text-slate-400" size={24} />,
-      price: { m: "9,90 €", a: "99 €" },
-      focus: "Bases & Suivi",
-      description: "L'essentiel pour digitaliser votre base de données et sécuriser vos relations clients.",
-      features: ['Gestionnaire Clientèle', 'Suivi de Réseau', 'Analyse de Performance'],
-    },
-    {
-      id: 'business',
-      name: 'BUSINESS',
-      icon: <Star className="text-indigo-600" size={24} />,
-      price: { m: "14,90 €", a: "149 €" },
-      focus: "Pilotage & Stratégie",
-      description: "Le pack favori : inclut le Planificateur de Succès et le Tableau de Bord détaillé.",
-      features: ['Tout le Pack STARTER', 'Planificateur de Succès', 'Tableau de Bord détaillé'],
-      popular: true
-    },
-    {
-      id: 'performance',
-      name: 'PERFORMANCE',
-      icon: <Crown className="text-amber-500" size={24} />,
-      price: { m: "19,90 €", a: "199 €" },
-      focus: "Leadership & Revenus",
-      description: "La puissance totale : inclut le Calculateur de Commissions et accès prioritaire aux futures Apps.",
-      features: ['Packs STARTER & BUSINESS', 'Calculateur de Commissions', 'Accès prioritaire futures Apps'],
-    }
+  const applications = [
+    { id: 1, name: "Gestionnaire Clientèle", path: "/adrclient", icon: <Users size={24}/>, pack: "starter" },
+    { id: 2, name: "Suivi de Réseau", path: "/adrbamembre", icon: <Users size={24}/>, pack: "starter" },
+    { id: 3, name: "Calculateur PRYSM io", path: "/prysmio", icon: <Calculator size={24}/>, pack: "starter" },
+    { id: 4, name: "Planificateur d'Objectif", path: "/simulateurobjectif", icon: <Calendar size={24}/>, pack: "business" },
+    { id: 5, name: "Tracker Global", path: "/tracker", icon: <Activity size={24}/>, pack: "business" },
+    { id: 6, name: "Analyse de Gains", path: "/simulateurgains", icon: <TrendingUp size={24}/>, pack: "performance" },
   ];
 
-  // --- LOGIQUE DE FILTRAGE ---
-  const getVisibleApps = () => {
-    if (selectedPack === 'performance') return applications;
-    if (selectedPack === 'business') return applications.filter(a => a.pack === 'starter' || a.pack === 'business');
-    if (selectedPack === 'starter') return applications.filter(a => a.pack === 'starter');
-    return [];
-  };
-
-  // --- AUTHENTIFICATION ---
-  useEffect(() => {
-    const initAuth = async () => {
-      try {
-        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-          await signInWithCustomToken(auth, __initial_auth_token);
-        } else {
-          await signInAnonymously(auth);
-        }
-      } catch (error) {
-        console.error("Auth error:", error);
-      }
-    };
-    initAuth();
-    const unsubscribe = onAuthStateChanged(auth, setUser);
-    return () => unsubscribe();
-  }, []);
-
-  const handleLeadSubmit = async (e) => {
+  const handleLogin = (e) => {
     e.preventDefault();
-    if (!formData.prenom || !formData.nom || !formData.email) return;
     setLoading(true);
-    try {
-      const leadsCollection = collection(db, 'artifacts', appId, 'public', 'data', 'leads');
-      await addDoc(leadsCollection, {
-        firstName: formData.prenom,
-        lastName: formData.nom,
-        email: formData.email,
-        timestamp: serverTimestamp(),
-        userId: user?.uid || 'anonymous',
-        source: 'Business NSK Portal'
-      });
-      setView('packs');
-    } catch (err) {
-      setErrorMsg("Erreur de connexion.");
-    } finally {
+    setTimeout(() => {
       setLoading(false);
-    }
+      setView('packs');
+    }, 800);
   };
 
-  const handleSelectPack = (packId) => {
-    const key = `${packId}_${isAnnual ? 'a' : 'm'}`;
-    window.open(links[key], '_blank');
-    setSelectedPack(packId);
-    setView('dashboard');
-  };
-
-  // --- MODALE LÉGALE ---
   const LegalModal = () => {
     if (!legalModal) return null;
     const content = {
-      conditions: {
-        title: "Conditions Générales",
-        sections: [
-          { h: "1. Objet", p: "Modalités d'accès aux outils NSK Strategic Intelligence." },
-          { h: "2. Services", p: "Outils de pilotage business sous forme d'abonnement numérique." }
-        ]
-      },
-      confidentialite: {
-        title: "Confidentialité",
-        sections: [
-          { h: "1. Collecte", p: "Nom et email uniquement pour valider l'accès." },
-          { h: "2. Sécurité", p: "Données chiffrées et jamais partagées." }
-        ]
-      }
+      mentions: { title: "Mentions Légales", p: "Éditeur : Invest In Your Future. Contact : +33 6 87 69 49 82. Hébergement : Vercel Inc." },
+      remboursement: { title: "Remboursement", p: "Art L221-28 : Le droit de rétractation ne peut être exercé pour les contenus numériques dont l'exécution commence immédiatement." },
+      conditions: { title: "Conditions CGV/CGU", p: "L'accès aux outils est strictement personnel et limité à 2 appareils simultanés par licence." },
+      confidentialite: { title: "Confidentialité", p: "L’accès aux outils est strictement personnel et limité à deux appareils par licence (un smartphone et un ordinateur)." }
     };
-    const active = content[legalModal];
     return (
-      <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-slate-900/60 backdrop-blur-sm">
-        <div className="bg-white w-full max-w-lg rounded-[2.5rem] p-8 relative border border-slate-100 italic">
-          <button onClick={() => setLegalModal(null)} className="absolute top-6 right-6 p-2 bg-slate-50 rounded-full"><X size={20}/></button>
-          <h3 className="text-xl font-black uppercase mb-6 flex items-center gap-2"><ScrollText className="text-indigo-600"/> {active.title}</h3>
-          <div className="space-y-6">
-            {active.sections.map((s, idx) => (
-              <div key={idx}><h4 className="text-[10px] font-black text-indigo-600 uppercase">{s.h}</h4><p className="text-xs font-bold text-slate-500">{s.p}</p></div>
-            ))}
+      <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-md flex items-center justify-center z-[100] p-6 italic font-sans">
+        <div className="bg-white p-10 rounded-[3rem] max-w-lg w-full relative shadow-2xl border border-slate-100">
+          <button onClick={() => setLegalModal(null)} className="absolute top-6 right-6 p-2 bg-slate-100 rounded-full hover:bg-slate-200"><X size={18}/></button>
+          <div className="flex items-center gap-4 text-indigo-600 mb-6">
+            <ScrollText size={24} />
+            <h3 className="text-xl font-black uppercase italic tracking-tighter">{content[legalModal].title}</h3>
           </div>
-          <button onClick={() => setLegalModal(null)} className="w-full mt-8 py-4 bg-slate-900 text-white rounded-xl font-black uppercase text-[10px]">Fermer</button>
+          <p className="text-slate-600 font-bold leading-relaxed mb-8 italic">{content[legalModal].p}</p>
+          <button onClick={() => setLegalModal(null)} className="w-full py-4 bg-slate-900 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest italic hover:bg-indigo-600 transition-colors">Fermer la fenêtre</button>
         </div>
       </div>
     );
   };
 
-  // --- VUE 1 : LOGIN ---
-  if (view === 'login') {
-    return (
-      <div className="min-h-screen bg-[#f8fafc] flex items-center justify-center p-6 font-sans italic">
-        <LegalModal />
-        <div className="w-full max-w-[460px] text-center space-y-10">
-          <div className="space-y-4">
-            <div className="inline-flex items-center justify-center w-24 h-24 bg-white rounded-[2.5rem] shadow-xl text-indigo-600 rotate-3"><Rocket size={40} /></div>
-            <h2 className="text-4xl font-black uppercase tracking-tighter italic">Business <span className="text-indigo-600">NSK</span></h2>
+  return (
+    <div className="min-h-screen bg-slate-50 text-slate-900 italic font-sans flex flex-col antialiased">
+      <LegalModal />
+      
+      {view === 'login' && (
+        <div className="flex-1 flex flex-col items-center justify-center p-6 animate-in fade-in zoom-in duration-700">
+          <div className="p-6 bg-white rounded-3xl shadow-xl text-indigo-600 mb-10 ring-8 ring-indigo-50 border border-slate-100">
+            <Rocket size={44} />
           </div>
-          <div className="bg-white rounded-[3.5rem] shadow-2xl p-10 relative overflow-hidden text-left border border-slate-50">
-            <div className="absolute top-0 left-0 w-full h-2 bg-indigo-600"></div>
-            <form onSubmit={handleLeadSubmit} className="space-y-4">
-              <input type="text" required placeholder="Prénom" value={formData.prenom} onChange={(e) => setFormData({...formData, prenom: e.target.value})} className="w-full h-16 px-6 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:border-indigo-600 font-bold italic" />
-              <input type="text" required placeholder="Nom" value={formData.nom} onChange={(e) => setFormData({...formData, nom: e.target.value})} className="w-full h-16 px-6 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:border-indigo-600 font-bold italic" />
-              <input type="email" required placeholder="Email Privé" value={formData.email} onChange={(e) => setFormData({...formData, email: e.target.value})} className="w-full h-16 px-6 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:border-indigo-600 font-bold italic" />
-              <button type="submit" disabled={loading} className="w-full h-16 bg-indigo-600 text-white rounded-2xl font-black uppercase tracking-widest text-[11px] shadow-xl hover:bg-indigo-700 transition-all">
-                {loading ? "Vérification..." : "Accéder aux Packs"}
+          <h1 className="text-5xl font-black uppercase tracking-tighter mb-12 italic leading-none text-center">
+            Business <span className="text-indigo-600">NSK</span>
+          </h1>
+          
+          <div className="bg-white p-12 rounded-[4rem] shadow-2xl w-full max-w-md border-t-8 border-indigo-600 text-left relative">
+            <div className="absolute -top-4 right-10 bg-indigo-600 text-white px-4 py-1 rounded-full text-[8px] font-black uppercase tracking-widest">Accès Sécurisé</div>
+            <form onSubmit={handleLogin} className="space-y-4">
+              <input placeholder="Prénom" required className="w-full p-5 bg-slate-50 rounded-2xl font-bold outline-none border border-slate-100 focus:border-indigo-300 transition-all italic text-sm" />
+              <input placeholder="Nom" required className="w-full p-5 bg-slate-50 rounded-2xl font-bold outline-none border border-slate-100 focus:border-indigo-300 transition-all italic text-sm" />
+              <input type="email" placeholder="Email" required className="w-full p-5 bg-slate-50 rounded-2xl font-bold outline-none border border-slate-100 focus:border-indigo-300 transition-all italic text-sm" />
+              <button type="submit" disabled={loading} className="w-full py-5 bg-indigo-600 text-white rounded-[1.5rem] font-black uppercase text-xs tracking-widest shadow-lg shadow-indigo-100 active:scale-95 transition-all italic mt-4 hover:bg-indigo-700">
+                {loading ? "Initialisation..." : "Découvrir les Packs →"}
               </button>
             </form>
           </div>
-        </div>
-      </div>
-    );
-  }
 
-  // --- VUE 2 : PACKS ---
-  if (view === 'packs') {
-    return (
-      <div className="min-h-screen bg-[#f8fafc] py-20 px-6 font-sans italic">
-        <LegalModal />
-        <div className="max-w-6xl mx-auto">
-          <div className="text-center mb-16">
-            <h1 className="text-5xl font-black uppercase tracking-tighter mb-6 italic">Choisissez votre <span className="text-indigo-600">Niveau</span></h1>
-            <div className="flex items-center justify-center gap-6 mt-10">
-              <span className={`text-xs font-black uppercase ${!isAnnual ? 'text-indigo-600' : 'text-slate-400'}`}>Mensuel</span>
-              <button onClick={() => setIsAnnual(!isAnnual)} className="w-16 h-8 bg-slate-200 rounded-full relative p-1">
-                <div className={`w-6 h-6 bg-indigo-600 rounded-full transform transition-transform ${isAnnual ? 'translate-x-8' : 'translate-x-0'}`}></div>
-              </button>
-              <span className={`text-xs font-black uppercase ${isAnnual ? 'text-indigo-600' : 'text-slate-400'}`}>Annuel (-20%)</span>
-            </div>
+          <div className="mt-12 grid grid-cols-2 gap-x-12 gap-y-3 w-full max-w-md px-4">
+            <button onClick={() => setLegalModal('mentions')} className="text-[10px] font-black uppercase text-slate-400 hover:text-indigo-600 text-left italic tracking-widest">Mentions Légales</button>
+            <button onClick={() => setLegalModal('remboursement')} className="text-[10px] font-black uppercase text-slate-400 hover:text-indigo-600 text-right italic tracking-widest">Remboursement</button>
+            <button onClick={() => setLegalModal('conditions')} className="text-[10px] font-black uppercase text-slate-400 hover:text-indigo-600 text-left italic tracking-widest">Conditions</button>
+            <button onClick={() => setLegalModal('confidentialite')} className="text-[10px] font-black uppercase text-slate-400 hover:text-indigo-600 text-right italic tracking-widest">Confidentialité</button>
           </div>
-          <div className="grid md:grid-cols-3 gap-8">
-            {packs.map((pack) => (
-              <div key={pack.id} className={`bg-white rounded-[3.5rem] border-2 p-10 flex flex-col relative ${pack.popular ? 'border-indigo-500 shadow-2xl scale-105' : 'border-slate-100'}`}>
-                <div className="mb-6"><h3 className="text-3xl font-black uppercase italic">{pack.name}</h3></div>
-                <div className="mb-8 font-black text-4xl">{isAnnual ? pack.price.a : pack.price.m}</div>
-                <div className="flex-grow space-y-4 mb-8">
-                  {pack.features.map((f, i) => <div key={i} className="flex items-center gap-3 text-xs font-bold"><Check size={14} className="text-emerald-500"/> {f}</div>)}
+        </div>
+      )}
+
+      {view === 'packs' && (
+        <div className="max-w-7xl mx-auto w-full py-20 px-6 text-center animate-in fade-in duration-700">
+          <h2 className="text-6xl font-black uppercase tracking-tighter mb-4 italic leading-none">Votre <span className="text-indigo-600">Stratégie</span></h2>
+          <p className="text-slate-500 font-bold mb-16 italic text-lg tracking-tight">Pilotez votre réussite avec nos solutions premium.</p>
+          
+          <div className="flex justify-center items-center gap-6 mb-20 italic">
+            <span className={`text-[10px] font-black transition-all tracking-widest ${!isAnnual ? 'text-indigo-600 scale-110' : 'text-slate-300'}`}>MENSUEL</span>
+            <div onClick={() => setIsAnnual(!isAnnual)} className="w-16 h-8 bg-slate-200 rounded-full p-1 cursor-pointer flex items-center relative transition-all shadow-inner">
+                <div className={`w-6 h-6 bg-indigo-600 rounded-full shadow-md transition-all duration-300 ${isAnnual ? 'translate-x-8' : 'translate-x-0'}`} />
+            </div>
+            <span className={`text-[10px] font-black transition-all tracking-widest ${isAnnual ? 'text-indigo-600 scale-110' : 'text-slate-300'}`}>ANNUEL <span className="text-emerald-500">(-20%)</span></span>
+          </div>
+
+          <div className="flex flex-wrap justify-center gap-10 items-stretch italic">
+            {[
+              { id:'starter', name:'STARTER', price: isAnnual ? '99 €' : '9,90 €', feat: ["Gestionnaire Clientèle", "Suivi de Réseau", "Calculateur PRYSM io"] },
+              { id:'business', name:'BUSINESS', price: isAnnual ? '149 €' : '14,90 €', pop:true, feat: ["Offre STARTER Incluse", "Planificateur d'Objectif", "Tracker Global"] },
+              { id:'performance', name:'PERFORMANCE', price: isAnnual ? '199 €' : '19,90 €', feat: ["Offre BUSINESS Incluse", "Analyse de Gains"] }
+            ].map(p => (
+              <div key={p.id} className={`bg-white p-14 rounded-[4rem] flex flex-col text-left transition-all duration-500 w-full max-w-[400px] border-2 relative ${p.pop ? 'border-indigo-600 shadow-2xl scale-105' : 'border-slate-100 shadow-sm hover:shadow-xl'}`}>
+                {p.pop && <div className="absolute -top-4 left-1/2 -translate-x-1/2 bg-indigo-600 text-white px-8 py-2 rounded-full text-[10px] font-black uppercase tracking-[0.2em] shadow-lg italic">LE PLUS POPULAIRE</div>}
+                <h3 className="text-4xl font-black uppercase mb-8 italic tracking-tighter">{p.name}</h3>
+                <div className="text-6xl font-black mb-2 italic tracking-tighter">{p.price}</div>
+                <div className="text-[10px] font-black text-slate-300 uppercase tracking-widest mb-12 italic">PAR {isAnnual ? 'AN' : 'MOIS'}</div>
+                <div className="space-y-4 mb-14 flex-grow italic">
+                  {p.feat.map((f, i) => (
+                    <div key={i} className="flex items-center gap-4 text-slate-600 font-bold text-sm italic">
+                      <div className="w-5 h-5 bg-emerald-50 rounded-full flex items-center justify-center border border-emerald-100">
+                        <Check size={12} className="text-emerald-500" strokeWidth={4} />
+                      </div>
+                      {f}
+                    </div>
+                  ))}
                 </div>
-                <button onClick={() => handleSelectPack(pack.id)} className="w-full h-16 bg-slate-900 text-white rounded-2xl font-black uppercase text-[11px] hover:bg-indigo-600 transition-all">Sélectionner</button>
+                <button onClick={() => { 
+                  const linkKey = `${p.id}_${isAnnual ? 'a' : 'm'}`;
+                  window.open(checkoutLinks[linkKey], '_blank'); 
+                  setSelectedPack(p.id); setView('dashboard'); 
+                }} className={`w-full py-6 rounded-[2rem] font-black uppercase text-[10px] tracking-[0.2em] shadow-lg italic active:scale-95 transition-all ${p.pop ? 'bg-indigo-600 text-white' : 'bg-slate-900 text-white hover:bg-indigo-600'}`}>Sélectionner cette offre</button>
               </div>
             ))}
           </div>
+          <button onClick={() => setView('login')} className="mt-20 text-[10px] font-black uppercase text-slate-300 hover:text-indigo-600 italic transition-all tracking-widest">← Retour à l'accueil</button>
         </div>
-      </div>
-    );
-  }
+      )}
 
-  // --- VUE 3 : DASHBOARD (FILTRAGE DES 6 APPS) ---
-  if (view === 'dashboard') {
-    const myApps = getVisibleApps();
-    return (
-      <div className="min-h-screen bg-[#f8fafc] py-16 px-6 font-sans italic">
-        <div className="max-w-5xl mx-auto">
-          <div className="flex justify-between items-center mb-12">
+      {view === 'dashboard' && (
+        <div className="max-w-7xl mx-auto w-full py-20 px-6 text-left animate-in zoom-in duration-500">
+          <div className="flex justify-between items-end mb-20 italic">
             <div>
-              <p className="text-indigo-600 text-[10px] font-black uppercase tracking-[0.3em] mb-2">Accès Stratégique Actif</p>
-              <h2 className="text-4xl font-black uppercase tracking-tighter italic">Espace <span className="text-indigo-600">{selectedPack}</span></h2>
+              <p className="text-indigo-600 text-[10px] font-black uppercase tracking-[0.5em] mb-4 italic">Espace Intelligence Actif</p>
+              <h2 className="text-6xl font-black uppercase tracking-tighter italic leading-none">Niveau <span className="text-indigo-600">{selectedPack}</span></h2>
+              <div className="mt-6 flex items-center gap-3 text-emerald-600 text-[10px] font-black uppercase italic bg-emerald-50 px-4 py-2 rounded-full border border-emerald-100 w-fit"><ShieldCheck size={18}/> Session Stratégique Sécurisée</div>
             </div>
-            <button onClick={() => setView('packs')} className="p-4 bg-white rounded-2xl shadow-sm text-slate-400 hover:text-indigo-600"><X size={24}/></button>
+            <button onClick={() => setView('packs')} className="p-6 bg-white rounded-[2rem] border border-slate-100 shadow-sm text-slate-300 hover:text-indigo-600 transition-all hover:shadow-xl"><X size={28} /></button>
           </div>
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
-            {myApps.map((app) => (
-              <div key={app.id} className="bg-white p-8 rounded-[3rem] shadow-xl border border-slate-50 flex flex-col gap-6 hover:border-indigo-500 transition-all group">
-                <div className="flex justify-between items-center">
-                  <div className="w-14 h-14 bg-indigo-50 rounded-2xl flex items-center justify-center text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white transition-all"><LayoutDashboard size={28}/></div>
-                  <span className="text-[9px] font-black text-slate-300 uppercase">{app.pack}</span>
-                </div>
-                <h3 className="text-xl font-black uppercase italic leading-tight">{app.name}</h3>
-                <button 
-                  onClick={() => window.location.href = app.file} 
-                  className="w-full py-4 bg-slate-900 text-white rounded-xl font-black uppercase text-[10px] flex items-center justify-center gap-2 group-hover:bg-indigo-600 transition-all"
-                >
-                  Ouvrir <ArrowRight size={14}/>
-                </button>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-10 italic">
+            {applications.filter(app => {
+              if (selectedPack === 'performance') return true;
+              if (selectedPack === 'business') return app.pack !== 'performance';
+              return app.pack === 'starter';
+            }).map((app) => (
+              <div key={app.id} className="bg-white p-12 rounded-[4rem] shadow-sm border border-slate-100 hover:shadow-2xl hover:-translate-y-3 transition-all duration-500 group flex flex-col italic relative overflow-hidden">
+                <div className="absolute top-0 right-0 w-32 h-32 bg-slate-50 rounded-bl-[5rem] -mr-10 -mt-10 group-hover:bg-indigo-50 transition-colors duration-500" />
+                <div className="w-20 h-20 bg-slate-50 rounded-3xl flex items-center justify-center text-indigo-600 mb-10 group-hover:bg-indigo-600 group-hover:text-white transition-all duration-500 relative shadow-inner">{app.icon}</div>
+                <h3 className="text-3xl font-black uppercase tracking-tight mb-10 italic leading-none">{app.name}</h3>
+                <button onClick={() => alert("Navigation vers " + app.path)} className="w-full py-6 bg-slate-900 text-white rounded-[1.8rem] font-black uppercase text-[10px] tracking-widest flex items-center justify-center gap-4 italic group-hover:bg-indigo-600 transition-all shadow-lg active:scale-95">Démarrer l'outil <ArrowRight size={18}/></button>
               </div>
             ))}
           </div>
         </div>
-      </div>
-    );
-  }
+      )}
+    </div>
+  );
 }
+
+export default App;

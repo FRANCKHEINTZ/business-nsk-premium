@@ -29,7 +29,7 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [supabase, setSupabase] = useState(null);
 
-  // --- INITIALISATION SUPABASE (Connexion Leads) ---
+  // --- INITIALISATION SUPABASE ---
   useEffect(() => {
     setMounted(true);
     const initSupabase = async () => {
@@ -40,14 +40,13 @@ export default function App() {
           'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJibXptZHVvamx4ZHpmZ21vbGx5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM4MTY3NDMsImV4cCI6MjA4OTM5Mjc0M30.plryXDY6786ct7TLIlh-DGWiCWi8OtQA9Te7LgsHz3E'
         );
         setSupabase(client);
-      } catch (e) { console.warn("Erreur Database"); }
+      } catch (e) { console.warn("Supabase local bypass"); }
     };
     initSupabase();
   }, []);
 
   if (!mounted) return null;
 
-  // --- CONFIGURATION LEMON SQUEEZY (Paiements) ---
   const checkoutLinks = {
     starter_m: "https://business-nsk.lemonsqueezy.com/checkout/buy/ed733f72-4562-4e93-8594-a3bdd319f5b3",
     starter_a: "https://business-nsk.lemonsqueezy.com/checkout/buy/3e40bab0-a707-429e-9424-fd0d6b0de81e",
@@ -57,9 +56,8 @@ export default function App() {
     performance_a: "https://business-nsk.lemonsqueezy.com/checkout/buy/8b1ed304-f6a6-4b65-8f8d-fb1011109bad",
   };
 
-  // --- MATRICE DES APPLICATIONS (Droits d'accès) ---
   const applications = [
-    { id: 1, name: "Gestionnaire Clientèle", path: "/adrclient", icon: <Zap size={24}/>, pack: "starter" },
+    { id: 1, name: "Gestionnaire Clientèle", path: "/adrclient", icon: <Users size={24}/>, pack: "starter" },
     { id: 2, name: "Suivi de Réseau", path: "/adrbamembre", icon: <Users size={24}/>, pack: "starter" },
     { id: 3, name: "Calculateur PRYSM io", path: "/prysmio", icon: <Calculator size={24}/>, pack: "starter" },
     { id: 4, name: "Planificateur d'Objectif", path: "/simulateurobjectif", icon: <Calendar size={24}/>, pack: "business" },
@@ -71,12 +69,7 @@ export default function App() {
     e.preventDefault();
     setLoading(true);
     const formData = new FormData(e.target);
-    const leadData = { 
-      Prénom: formData.get('p'), 
-      Nom: formData.get('n'), 
-      Email: formData.get('e') 
-    };
-
+    const leadData = { prenom: formData.get('p'), nom: formData.get('n'), email: formData.get('e') };
     try {
       if (supabase) await supabase.from('leads').insert([leadData]);
       setView('packs');
@@ -87,10 +80,10 @@ export default function App() {
   const LegalModal = () => {
     if (!legalModal) return null;
     const content = {
-      mentions: { title: "Mentions Légales", p: "Éditeur : Invest In Your Future. Contact : +33 6 87 69 49 82. Hébergement : Vercel Inc. Plateforme de pilotage stratégique." },
-      remboursement: { title: "Remboursement", p: "Art L221-28 : Le droit de rétractation ne peut être exercé pour les contenus numériques fournis sur un support non matériel dont l'exécution a commencé après accord préalable exprès." },
-      conditions: { title: "Conditions", p: "L'accès aux outils est strictement personnel et limité à 2 appareils simultanés par licence. Toute revente ou partage est prohibé." },
-      confidentialite: { title: "Confidentialité", p: "Vos données sont protégées par chiffrement SSL Supabase. Nous ne collectons que les informations nécessaires à votre identification professionnelle." }
+      mentions: { title: "Mentions Légales", p: "Éditeur : Invest In Your Future. Contact : +33 6 87 69 49 82. Hébergement : Vercel Inc." },
+      remboursement: { title: "Remboursement", p: "Art L221-28 : Le droit de rétractation ne peut être exercé pour les contenus numériques dont l'exécution commence immédiatement." },
+      conditions: { title: "Conditions CGV/CGU", p: "L'accès aux outils est strictement personnel et limité à 2 appareils simultanés par licence." },
+      confidentialite: { title: "Confidentialité", p: "Usage strictement professionnel. Données protégées par SSL." }
     };
     return (
       <div style={styles.modal}>
@@ -192,7 +185,7 @@ export default function App() {
               if (selectedPack === 'business') return app.pack !== 'performance';
               return app.pack === 'starter';
             }).map((app) => (
-              <div key={app.id} style={{ backgroundColor: 'white', padding: '44px', borderRadius: '52px', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)', display: 'flex', flexDirection: 'column', gap: '22px', border: '1px solid #f1f5f9' }}>
+              <div key={app.id} style={{ backgroundColor: 'white', padding: '44px', borderRadius: '52px', boxShadow: '0 25px 35px -10px rgba(0,0,0,0.1)', display: 'flex', flexDirection: 'column', gap: '22px', border: '1px solid #f1f5f9' }}>
                 <div style={{ width: '60px', height: '60px', backgroundColor: '#f1f5f9', borderRadius: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#4f46e5' }}>{app.icon}</div>
                 <h3 style={{ margin: 0, fontSize: '24px', fontWeight: '900', textTransform: 'uppercase' }}>{app.name}</h3>
                 <button onClick={() => window.location.href = window.location.origin + app.path} style={styles.btnIndigo}>Démarrer <ArrowRight size={18} style={{marginLeft:'10px'}}/></button>

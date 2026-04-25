@@ -1,252 +1,238 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
-import { ArrowLeft, Trash2, ShieldCheck, Crown, Target, Zap } from 'lucide-react';
+import { ArrowLeft, RotateCcw, TrendingUp, ShoppingCart, Target, Zap, Crown, Check, CloudUpload, Info } from 'lucide-react';
 
-// --- CONFIGURATION TECHNIQUE ---
+/**
+ * ADR BA & MEMBRES - VERSION EXPERT RESPONSIVE & SYNC SUPABASE
+ * DESIGN : FULL BLUE EDITION (bg-blue-600)
+ * FIX : Plafond annuel de 900 points (12 x 75 pts)
+ * FIX : Rythme Mensuel (20/30%) et Bimestriel (10%)
+ * FEATURE : Rattachement Supabase pour sauvegarde des simulations
+ */
+
 const S_URL = "https://rbmzmduojlxdzfgmolly.supabase.co";
 const S_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJibXptZHVvamx4ZHpmZ21vbGx5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM4MTY3NDMsImV4cCI6MjA4OTM5Mjc0M30.plryXDY6786ct7TLIlh-DGWiCWi8OtQA9Te7LgsHz3E";
-const COEFF = 1.225;
+
+const COEFF = 1.225; // Ratio BA/Membre spécifique
 const MIN_SV = 50;
-const MAX_PTS_MOIS = 75;
-const MAX_PTS_AN = 900;
-const NB_MOIS = 15;
+const MAX_PTS_M = 75;
+const MAX_PTS_A = 900; // MAXIMUM ANNUEL
+const MOIS = 15;
 
 export default function App() {
-  const [authorized, setAuthorized] = useState(false);
-  const [frequency, setFrequency] = useState('mensuel');
-  const [data, setData] = useState({ 
-    inputs: Array(NB_MOIS).fill(''), 
-    spent: Array(NB_MOIS).fill('') 
-  });
+  const [mounted, setMounted] = useState(false);
+  const [frequency, setFrequency] = useState('mensuel'); 
+  const [inputsOrder, setInputsOrder] = useState(Array(MOIS).fill(''));
+  const [inputsUsed, setInputsUsed] = useState(Array(MOIS).fill(''));
   const [results, setResults] = useState([]);
-  const [summary, setSummary] = useState({ solde: 0, euro: 0 });
+  const [totals, setTotals] = useState({ pts: 0, euro: 0 });
+  const [syncStatus, setSyncStatus] = useState(null);
+  const [supabase, setSupabase] = useState(null);
 
-  // --- SÉCURITÉ ---
-  useEffect(() => {
-    const checkAuth = async () => {
+  // --- BLOC RESTAURÉ (Lignes 32 à 45 de ta capture d'écran) ---
+  useEffect(() => { 
+    setMounted(true); 
+    const initSupabase = async () => {
       try {
         const { createClient } = await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm');
-        const supabase = createClient(S_URL, S_KEY);
-        const { data: { session } } = await supabase.auth.getSession();
-        
-        const isDev = window.location.hostname.includes('localhost') || 
-                      window.location.hostname.includes('goog') ||
-                      window.location.protocol === 'blob:';
-
-        if (!session && !isDev) {
-          window.location.href = window.location.origin;
-        } else {
-          setAuthorized(true);
-        }
-      } catch (e) { console.warn("Sécurité active"); }
+        const client = createClient(S_URL, S_KEY);
+        setSupabase(client);
+      } catch (e) {
+        console.warn("Initialisation Supabase différée ou mode local.");
+      }
     };
-    checkAuth();
+    initSupabase();
   }, []);
-
-  // --- CALCULS ---
+ 
+  // --- LOGIQUE DE CALCUL STRATÉGIQUE ADR BA/MEMBRES ---
   useEffect(() => {
-    if (!authorized) return;
-    let currentSolde = 0;
-    let lastValidSolde = 0;
-    let moisVides = 0;
+    if (!mounted) return;
+    let balance = 0;
+    let lastIdxWithData = -1;
     const newResults = [];
 
-    for (let i = 0; i < NB_MOIS; i++) {
-      const moisNum = i + 1;
-      // En bimestriel, les mois pairs (2, 4, 6...) sont des mois de repos
-      const isRepos = frequency === 'bimestriel' && moisNum % 2 === 0;
-      
-      const valPrice = isRepos ? '' : data.inputs[i];
-      const price = parseFloat(valPrice) || 0;
-      const sv = price / COEFF;
-      const spentRequested = isRepos ? 0 : parseFloat(data.spent[i]) || 0;
+    inputsOrder.forEach((v, i) => { if (parseFloat(v) > 0) lastIdxWithData = i; });
 
-      if (!isRepos) {
-        if (sv < MIN_SV - 0.005) moisVides++;
-        else moisVides = 0;
+    for (let i = 0; i < MOIS; i++) {
+      const monthNum = i + 1;
+      const isOff = frequency === 'bimestriel' && monthNum % 2 === 0;
+      const valOrder = isOff ? '' : (parseFloat(inputsOrder[i]) || 0);
+      const sv = valOrder / COEFF;
+      
+      const availableBefore = balance;
+      let used = parseFloat(inputsUsed[i]) || 0;
+      if (used > availableBefore) used = availableBefore;
+      balance -= used;
+
+      let earned = 0;
+      let rate = 0;
+
+      if (!isOff && valOrder > 0) {
+        if (frequency === 'bimestriel') {
+          rate = 0.10; 
+          if (sv >= MIN_SV) earned = Math.min(sv * rate, MAX_PTS_M);
+        } else {
+          rate = monthNum >= 13 ? 0.30 : 0.20;
+          if (sv >= MIN_SV) earned = Math.min(sv * rate, MAX_PTS_M);
+        }
       }
-      
-      if (moisVides >= 2) currentSolde = 0;
 
-      const soldeStart = currentSolde;
-      const depenseReelle = Math.min(spentRequested, soldeStart);
-      const bonusEuro = depenseReelle * COEFF;
-      const soldePostDepense = soldeStart - depenseReelle;
+      balance += earned;
+      // Blocage au plafond annuel de 900 points
+      if (balance > MAX_PTS_A) balance = MAX_PTS_A;
+      if (balance < 0) balance = 0;
 
-      // Calcul du taux : 20%/30% pour mensuel, 10% fixe pour bimestriel
-      const taux = frequency === 'mensuel' ? (moisNum >= 13 ? 0.3 : 0.2) : 0.1;
-      let gain = (!isRepos && sv >= MIN_SV - 0.005) ? Math.min(sv * taux, MAX_PTS_MOIS) : 0;
-
-      currentSolde = soldePostDepense + gain;
-      if (currentSolde > MAX_PTS_AN) currentSolde = MAX_PTS_AN;
-      if (valPrice !== '' || data.spent[i] !== '') lastValidSolde = currentSolde;
-
-      newResults.push({ moisNum, isRepos, price, sv, gain, taux, depenseReelle, bonusEuro, soldeStart, currentSolde, valPrice, valSpent: data.spent[i] });
+      newResults.push({
+        monthNum, isOff, valOrder, sv, earned, rate, balance, availableBefore,
+        showRow: i <= lastIdxWithData || (i === 0 && inputsOrder[0] === '')
+      });
     }
     setResults(newResults);
-    setSummary({ solde: lastValidSolde, euro: lastValidSolde * COEFF });
-  }, [data, frequency, authorized]);
+    setTotals({ pts: balance, euro: balance * COEFF });
+  }, [inputsOrder, inputsUsed, frequency, mounted]);
 
-  const handleUpdate = (index, field, value) => {
-    const newData = { ...data };
-    newData[field][index] = value.replace(',', '.');
-    setData(newData);
+  // --- FONCTION DE SAUVEGARDE SUR SUPABASE ---
+  const saveToSupabase = async () => {
+    if (!supabase) return;
+    setSyncStatus('loading');
+    
+    const dataToSave = {
+      type_outil: "ADR BA MEMBRE",
+      rythme: frequency,
+      cagnotte_points: totals.pts,
+      valeur_shopping: totals.euro,
+      timestamp: new Date().toISOString()
+    };
+
+    try {
+      const { error } = await supabase.from('simulations').insert([dataToSave]);
+      if (error) throw error;
+      setSyncStatus('success');
+      setTimeout(() => setSyncStatus(null), 3000);
+    } catch (err) {
+      setSyncStatus('error');
+      setTimeout(() => setSyncStatus(null), 3000);
+    }
   };
 
-  const handleGoBack = () => {
-    if (typeof window !== 'undefined') window.location.href = window.location.origin;
-  };
-
-  if (!authorized) return <div className="min-h-screen bg-slate-900 flex items-center justify-center text-white italic font-black uppercase tracking-widest text-[10px]">Vérification de l'accès...</div>;
+  if (!mounted) return null;
 
   return (
-    <div className="p-4 md:p-10 text-[#0f172a] bg-[#f8fafc] min-h-screen italic font-sans" style={{ fontFamily: "'Inter', sans-serif" }}>
-      <div className="max-w-6xl mx-auto space-y-8">
+    <div className="p-6 md:p-12 text-slate-900 bg-slate-50 min-h-screen italic font-black uppercase font-sans">
+      <div className="max-w-7xl mx-auto space-y-10 font-black">
         
-        {/* Navigation */}
-        <button onClick={handleGoBack} className="no-print flex items-center gap-2 text-[10px] font-black uppercase text-slate-400 hover:text-blue-600 transition-all mb-4">
-            <ArrowLeft size={14} /> Retour au Portail
-        </button>
-
-        {/* HEADER SECTION */}
-        <header className="bg-white rounded-[3rem] p-12 shadow-sm border border-slate-100 text-center space-y-6">
-            <div className="flex justify-center">
-                <span className="bg-[#2563eb] text-white text-[10px] font-black px-6 py-2 rounded-full uppercase tracking-widest shadow-lg shadow-blue-100">
-                    Espace Brand Affiliate & Membres
-                </span>
+        {/* NAVIGATION HAUTE */}
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+            <button onClick={() => window.location.href = window.location.origin} className="flex items-center gap-2 text-[10px] font-black uppercase text-slate-400 hover:text-blue-600 transition-all font-black">
+                <ArrowLeft size={16} /> Retour Portail
+            </button>
+            <div className="flex gap-4">
+                <button 
+                  onClick={saveToSupabase} 
+                  disabled={syncStatus === 'loading'}
+                  className={`p-4 rounded-2xl border flex items-center gap-2 text-[10px] font-black italic transition-all ${syncStatus === 'success' ? 'bg-emerald-500 text-white border-emerald-600' : syncStatus === 'error' ? 'bg-red-500 text-white border-red-600' : 'bg-blue-600 text-white border-blue-700 hover:bg-blue-700'}`}
+                >
+                    <CloudUpload size={16}/> {syncStatus === 'loading' ? 'Synchro...' : syncStatus === 'success' ? 'Sauvegardé !' : 'Sauvegarder Plan'}
+                </button>
+                <button onClick={() => { setInputsOrder(Array(MOIS).fill('')); setInputsUsed(Array(MOIS).fill('')); }} className="p-4 bg-white text-slate-400 hover:text-red-500 rounded-2xl border border-slate-100 flex items-center gap-2 text-[10px] font-black italic">
+                    <RotateCcw size={16}/> Reset
+                </button>
             </div>
-            <h1 className="text-4xl md:text-5xl font-black text-[#0f172a] uppercase tracking-tighter italic">
-                Planificateur de Rentabilité ADR
-            </h1>
-            <p className="text-slate-500 text-sm font-bold opacity-80">
-                Mesurez l'accumulation de vos avantages produits avec précision.
-            </p>
-            
-            {/* BADGES EN COULEUR */}
-            <div className="flex flex-wrap justify-center gap-4 pt-2">
-                <div className="bg-blue-50 text-blue-700 px-5 py-2 rounded-full border-2 border-blue-100 text-[10px] font-black uppercase tracking-wider shadow-sm flex items-center gap-2">
-                    <Target size={14}/> Seuil : 50 SV min (~61.25 €)
-                </div>
-                <div className="bg-amber-50 text-amber-700 px-5 py-2 rounded-full border-2 border-amber-100 text-[10px] font-black uppercase tracking-wider shadow-sm flex items-center gap-2">
-                    <Zap size={14}/> Max : 75 pts/mois
-                </div>
-                <div className="bg-emerald-50 text-emerald-700 px-5 py-2 rounded-full border-2 border-emerald-100 text-[10px] font-black uppercase tracking-wider shadow-sm flex items-center gap-2">
-                    <Crown size={14}/> Plafond : 900 pts/an
-                </div>
+        </div>
+
+        {/* HEADER BRAND AFFILIATE */}
+        <header className="bg-white rounded-[4rem] p-12 shadow-sm border border-slate-200 text-center font-black">
+            <h1 className="text-4xl md:text-5xl font-black tracking-tighter italic uppercase">RENTABILITÉ ADR BA & MEMBRES</h1>
+            <div className="flex justify-center flex-wrap gap-4 mt-8">
+                <div className="bg-blue-50 text-blue-600 px-5 py-2 rounded-full text-[10px] font-black border border-blue-100 uppercase italic leading-none">Seuil : 50 SV min (~61.25 €)</div>
+                <div className="bg-emerald-50 text-emerald-600 px-5 py-2 rounded-full text-[10px] font-black border border-emerald-100 uppercase italic leading-none">Max Mensuel : 75 pts</div>
+                <div className="bg-slate-950 text-white px-5 py-2 rounded-full text-[10px] font-black border border-slate-800 uppercase italic leading-none">Plafond Annuel : 900 pts</div>
             </div>
         </header>
 
-        {/* CHOIX DU RYTHME */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 no-print">
+        {/* SÉLECTEUR DE RYTHME STRATÉGIQUE */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 font-black">
             <button 
                 onClick={() => setFrequency('mensuel')}
-                className={`p-10 rounded-[3rem] border-2 transition-all text-left relative overflow-hidden ${frequency === 'mensuel' ? 'border-[#2563eb] bg-white shadow-xl shadow-blue-50 ring-4 ring-blue-50' : 'border-slate-100 bg-slate-50 opacity-60'}`}
+                className={`p-10 rounded-[3rem] border-4 transition-all text-left relative overflow-hidden ${frequency === 'mensuel' ? 'border-blue-600 bg-white shadow-2xl scale-[1.02]' : 'border-slate-100 bg-slate-50 opacity-40 hover:opacity-100'}`}
             >
-                <div className="flex justify-between items-start">
-                    <h3 className="text-2xl font-black uppercase tracking-tighter">Rythme Mensuel</h3>
-                    <div className={`${frequency === 'mensuel' ? 'bg-[#2563eb]' : 'bg-slate-400'} text-white px-5 py-2 rounded-xl font-black text-lg`}>20% ➔ 30%</div>
+                <div className="flex justify-between items-center mb-6">
+                    <h3 className="text-2xl font-black italic uppercase">Rythme Mensuel</h3>
+                    <div className="bg-blue-600 text-white px-5 py-2 rounded-xl text-lg font-black uppercase leading-none">20% ➔ 30%</div>
                 </div>
-                <p className="text-sm text-slate-500 mt-6 leading-snug font-medium">
-                    Gagnez 20% pendant 12 mois, puis profitez de <span className="text-[#2563eb] font-bold underline decoration-2 underline-offset-4">30% à vie</span> dès le 13ème mois.
-                </p>
+                <p className="text-xs text-slate-500 font-black normal-case italic leading-relaxed">Accumulation maximale : 20% la première année, puis 30% dès le 13ème mois de fidélité. Idéal pour optimiser les retours gratuits.</p>
+                {frequency === 'mensuel' && <Check className="absolute bottom-6 right-6 text-blue-600 font-black" size={32} strokeWidth={4} />}
             </button>
 
             <button 
                 onClick={() => setFrequency('bimestriel')}
-                className={`p-10 rounded-[3rem] border-2 transition-all text-left relative overflow-hidden ${frequency === 'bimestriel' ? 'border-[#0f172a] bg-white shadow-xl ring-4 ring-slate-100' : 'border-slate-100 bg-slate-50 opacity-60'}`}
+                className={`p-10 rounded-[3rem] border-4 transition-all text-left relative overflow-hidden ${frequency === 'bimestriel' ? 'border-slate-900 bg-white shadow-2xl scale-[1.02]' : 'border-slate-100 bg-slate-50 opacity-40 hover:opacity-100'}`}
             >
-                <div className="flex justify-between items-start">
-                    <h3 className="text-2xl font-black uppercase tracking-tighter">Rythme Bimestriel</h3>
-                    <div className={`${frequency === 'bimestriel' ? 'bg-[#0f172a]' : 'bg-slate-400'} text-white px-5 py-2 rounded-xl font-black text-lg`}>10%</div>
+                <div className="flex justify-between items-center mb-6">
+                    <h3 className="text-2xl font-black italic uppercase">Rythme Bimestriel</h3>
+                    <div className="bg-slate-900 text-white px-5 py-2 rounded-xl text-lg font-black uppercase leading-none">10%</div>
                 </div>
-                <p className="text-sm text-slate-500 mt-6 leading-snug font-medium">
-                    Un rythme espacé avec un gain constant de 10% en points cadeaux.
-                </p>
+                <p className="text-xs text-slate-500 font-black normal-case italic leading-relaxed">Rythme espacé : taux fixe de 10% de retour produit sur toutes vos commandes validées, sans progression de palier.</p>
+                {frequency === 'bimestriel' && <Check className="absolute bottom-6 right-6 text-slate-900 font-black" size={32} strokeWidth={4} />}
             </button>
         </div>
 
-        {/* INDICATEURS CAGNOTTE */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="md:col-span-2 bg-[#0f172a] text-white rounded-[3rem] p-12 shadow-2xl flex items-center justify-between border-b-[10px] border-[#2563eb] relative overflow-hidden">
-                <div className="relative z-10">
-                    <span className="text-[10px] uppercase font-black text-[#2563eb] tracking-[0.3em]">Cagnotte de points restante</span>
-                    <div className="text-7xl font-black mt-2 tracking-tighter">
-                        {summary.solde.toFixed(2)} <span className="text-xl opacity-30 font-bold ml-2">Pts</span>
-                    </div>
-                </div>
-                <div className="text-right border-l border-white/10 pl-12 relative z-10">
-                    <span className="text-[10px] uppercase font-black text-[#10b981] tracking-[0.2em]">Valeur estimée en euros</span>
-                    <div className="text-4xl font-black text-[#10b981] mt-2 tracking-tight">
-                        ≈ {summary.euro.toFixed(2)} €
-                    </div>
-                </div>
+        {/* INDICATEURS DE SOLDE */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-10 font-black">
+            <div className="bg-slate-950 text-white rounded-[4rem] p-14 shadow-2xl border-b-[12px] border-blue-600 relative overflow-hidden font-black uppercase">
+                <span className="text-[10px] uppercase font-black opacity-50 tracking-widest text-blue-400 italic">Cagnotte Points Brand Affiliate</span>
+                <div className="text-7xl font-black mt-4 tracking-tighter italic">{totals.pts.toFixed(2)} <span className="text-2xl opacity-30">PTS</span></div>
+                <ShoppingCart className="absolute -right-12 -bottom-12 opacity-5" size={250} />
+                {totals.pts >= MAX_PTS_A && (
+                    <div className="absolute top-6 right-6 bg-blue-600/20 text-blue-400 border border-blue-400/30 px-3 py-1 rounded-full text-[8px] font-black italic">PLAFOND ATTEINT</div>
+                )}
             </div>
-
-            <button 
-                onClick={() => setData({ inputs: Array(NB_MOIS).fill(''), spent: Array(NB_MOIS).fill('') })} 
-                className="bg-white border border-slate-100 rounded-[3rem] p-12 flex flex-col items-center justify-center group hover:bg-red-50 transition-all shadow-sm no-print"
-            >
-                <div className="p-4 rounded-full bg-red-50 group-hover:bg-red-100 transition-colors">
-                    <Trash2 size={42} className="text-red-500" />
-                </div>
-                <span className="text-[11px] font-black uppercase mt-5 tracking-[0.2em] text-red-500">Réinitialiser</span>
-            </button>
+            <div className="bg-white rounded-[4rem] p-14 shadow-xl border border-slate-200 border-b-[12px] border-emerald-500 font-black uppercase">
+                <span className="text-[10px] uppercase font-black text-slate-400 tracking-widest italic">Valeur Shopping Estimée (HT)</span>
+                <div className="text-6xl font-black mt-4 text-emerald-600 tracking-tighter italic">{totals.euro.toFixed(2)} €</div>
+                <TrendingUp className="absolute top-10 right-10 text-emerald-50" size={100} />
+            </div>
         </div>
 
-        {/* TABLEAU */}
-        <div className="bg-white rounded-[3rem] shadow-xl border border-slate-100 overflow-hidden">
-            <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse min-w-[900px]">
-                    <thead>
-                        <tr className="bg-slate-50/50 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] border-b border-slate-100">
-                            <th className="p-8 w-24 text-center italic">Mois</th>
-                            <th className="p-8">Commande Payée (€)</th>
-                            <th className="p-8 text-center text-blue-600 bg-blue-50/20 text-[10px] uppercase tracking-widest">Retour Points</th>
-                            <th className="p-8 text-center text-emerald-600 bg-emerald-50/20 text-[10px] uppercase tracking-widest">Dépense (Pts)</th>
-                            <th className="p-8 text-right bg-[#0f172a] text-white text-[10px] uppercase tracking-widest">Stock Disponible</th>
+        {/* MATRICE DE SIMULATION LARGE */}
+        <div className="bg-white rounded-[4rem] shadow-xl border border-slate-100 overflow-hidden font-black">
+            <div className="overflow-x-auto font-black italic">
+                <table className="w-full text-left font-black uppercase italic">
+                    <thead className="bg-slate-50 text-slate-400 text-[10px] font-black uppercase tracking-widest font-black italic">
+                        <tr>
+                            <th className="p-10 w-24 text-center italic">Mois</th>
+                            <th className="p-10">Commande (€)</th>
+                            <th className="p-10 text-center text-blue-600">Taux (%)</th>
+                            <th className="p-10 text-center text-blue-600 font-black">Points Gagnés</th>
+                            <th className="p-10 text-center text-orange-600 font-black">Dépenses (Pts)</th>
+                            <th className="p-10 text-right text-slate-900 font-black">Solde Cumulé</th>
                         </tr>
                     </thead>
-                    <tbody className="text-sm font-bold">
+                    <tbody className="font-black italic">
                         {results.map((row, i) => (
-                          <tr key={i} className={`border-b border-slate-50 transition-all ${row.isRepos ? 'opacity-30 bg-slate-50 grayscale pointer-events-none' : 'hover:bg-slate-50/30'} ${row.moisNum >= 13 && frequency === 'mensuel' ? 'bg-amber-50/5' : ''}`}>
-                            <td className="p-6 font-black text-slate-200 text-3xl text-center italic">{row.moisNum}</td>
-                            <td className="p-6">
-                                {!row.isRepos ? (
-                                    <div className="space-y-1">
-                                        <div className={`flex items-center gap-2 px-5 py-4 rounded-2xl border-2 transition-all ${row.valPrice !== '' ? (row.sv >= MIN_SV - 0.01 ? 'border-[#2563eb] bg-white shadow-md' : 'border-red-400 bg-white') : 'border-slate-100 bg-slate-50'}`}>
-                                            <input type="text" value={row.valPrice} onChange={(e) => handleUpdate(i, 'inputs', e.target.value)} placeholder="0.00" className="w-full bg-transparent font-black text-[#0f172a] outline-none text-2xl" />
-                                            <span className="text-slate-300 font-black italic">€</span>
-                                        </div>
-                                        <div className="mt-1 flex justify-between px-1">
-                                            <span className="text-[10px] text-blue-600 font-black uppercase italic">{row.valPrice !== '' ? `${row.sv.toFixed(2)} SV` : ''}</span>
-                                            <span className={`text-[9px] font-black uppercase ${row.sv < MIN_SV - 0.01 ? 'text-red-500' : 'text-[#10b981]'}`}>{row.valPrice !== '' ? (row.sv < MIN_SV - 0.01 ? 'Seuil insuffisant' : 'ADR Validé') : ''}</span>
-                                        </div>
-                                    </div>
-                                ) : (
-                                    <div className="py-4 text-slate-400 text-center font-black uppercase text-[10px] tracking-widest">Repos Bimestriel</div>
-                                )}
-                            </td>
-                            <td className="p-6 text-center bg-blue-50/5">
-                                {row.gain > 0 ? (
-                                  <div className="flex flex-col items-center">
-                                    <span className="text-3xl font-black text-[#2563eb]">+{row.gain.toFixed(2)}</span>
-                                    <span className={`px-3 py-1 rounded-full text-[9px] font-black uppercase mt-1 ${row.taux === 0.3 ? 'bg-amber-500 text-white shadow-md' : 'bg-blue-100 text-[#2563eb]'}`}>{(row.taux*100)}%</span>
-                                  </div>
-                                ) : <span className="text-slate-100 text-2xl font-black">—</span>}
-                            </td>
-                            <td className="p-6 text-center bg-emerald-50/5">
-                                {!row.isRepos && (
-                                    <div className={`flex items-center px-4 py-3 rounded-2xl border-2 transition-all ${row.valSpent !== '' ? 'border-[#10b981] bg-white shadow-sm' : 'border-slate-100 bg-slate-50'}`}>
-                                        <input type="text" value={row.valSpent} onChange={(e) => handleUpdate(i, 'spent', e.target.value)} placeholder="0" className="w-full bg-transparent font-black text-center text-xl" />
-                                    </div>
-                                )}
-                            </td>
-                            <td className="p-6 text-right bg-slate-50/30">
-                                <div className={`inline-flex flex-col items-end px-6 py-3 rounded-2xl font-black transition-all ${row.soldeStart > 0 || row.currentSolde > 0 ? 'bg-[#0f172a] text-white shadow-2xl scale-105' : 'bg-slate-100 text-slate-300'}`}>
-                                    <div className="text-2xl italic tracking-tighter">{row.soldeStart.toFixed(2)}</div>
-                                    <div className="text-[9px] uppercase tracking-widest opacity-50 italic">Points stock</div>
+                          <tr key={i} className={`border-b border-slate-50 hover:bg-slate-50/50 transition-colors ${row.isOff ? 'bg-slate-100 opacity-40 grayscale pointer-events-none' : ''}`}>
+                            <td className="p-8 font-black text-slate-200 text-4xl text-center italic leading-none">{row.monthNum}</td>
+                            <td className="p-8 font-black">
+                                <div className={`flex items-center gap-4 px-6 py-4 rounded-2xl border-2 transition-all ${row.valOrder > 0 ? 'border-blue-600 bg-white font-black' : 'border-slate-100 bg-slate-50 font-black'}`}>
+                                    <input type="text" value={inputsOrder[i]} onChange={(e) => { const n = [...inputsOrder]; n[i] = e.target.value; setInputsOrder(n); }} placeholder="0.00" className="w-full bg-transparent font-black text-slate-800 outline-none text-2xl" />
+                                    <span className="text-slate-300">€</span>
                                 </div>
+                            </td>
+                            <td className="p-8 text-center font-black">
+                                {row.valOrder > 0 && <span className={`px-4 py-1.5 rounded-full text-[10px] font-black uppercase ${row.rate === 0.3 ? 'bg-amber-500 text-white shadow-lg' : 'bg-blue-100 text-blue-600'}`}>{(row.rate * 100)}%</span>}
+                            </td>
+                            <td className="p-8 text-center font-black">
+                                {row.earned > 0 && <span className="text-3xl font-black text-blue-600">+{row.earned.toFixed(2)}</span>}
+                            </td>
+                            <td className="p-8 text-center font-black">
+                                <input type="text" value={inputsUsed[i]} onChange={(e) => { const n = [...inputsUsed]; n[i] = e.target.value; setInputsUsed(n); }} placeholder="0" className="w-24 p-3 bg-slate-50 rounded-xl border border-slate-200 font-black text-center" />
+                            </td>
+                            <td className="p-8 text-right font-black">
+                                <span className={`text-2xl font-black italic ${row.balance > 0 ? 'text-slate-950 font-black' : 'text-slate-200 font-black'}`}>
+                                    {row.balance.toFixed(2)}
+                                    {row.balance >= MAX_PTS_A && i < MOIS-1 && <span className="block text-[8px] text-blue-600 font-black">MAX ATTEINT</span>}
+                                </span>
                             </td>
                           </tr>
                         ))}
@@ -255,9 +241,15 @@ export default function App() {
             </div>
         </div>
 
-        <button onClick={() => window.print()} className="no-print w-full py-10 bg-[#0f172a] text-white font-black rounded-[3rem] hover:bg-slate-800 transition-all shadow-2xl text-[11px] uppercase tracking-[0.5em] italic">
-            Imprimer mon plan de rentabilité stratégique
-        </button>
+        <div className="p-10 bg-blue-50 border border-blue-100 rounded-[3rem] flex items-start gap-6 font-black uppercase">
+            <Info size={32} className="text-blue-600 mt-1" />
+            <div className="space-y-2">
+                <h4 className="text-lg font-black text-blue-900 italic uppercase leading-none">Rappel Stratégique Masters</h4>
+                <p className="text-xs text-blue-700 font-bold normal-case leading-relaxed italic opacity-80">
+                    Les points ADR expirent s'ils ne sont pas utilisés dans les 12 mois suivant leur obtention. Le simulateur prend en compte le plafond contractuel de **900 points annuels**. Veillez à planifier vos dépenses de points pour maximiser vos stocks sans frais.
+                </p>
+            </div>
+        </div>
       </div>
     </div>
   );

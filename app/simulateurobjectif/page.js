@@ -1,366 +1,330 @@
-"use client";
-
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
-  ArrowLeft, Target, User, Users, Globe, 
-  Lock, Unlock, ShieldCheck, TrendingUp, 
-  Zap, AlertTriangle, CheckCircle2, RotateCcw,
-  Trophy, Medal, Star
+  Users, ShoppingBag, Target, Calculator, TrendingUp, Zap, 
+  ShoppingCart, ArrowRight, Sparkles, RefreshCcw, Info, Lock, Unlock, 
+  ChevronRight, Wallet, Coins, ShieldCheck, Trash2
 } from 'lucide-react';
+import { initializeApp } from 'firebase/app';
+import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
+import { getFirestore, doc, setDoc, onSnapshot } from 'firebase/firestore';
 
-// --- CONFIGURATION TECHNIQUE ---
-const S_URL = "https://rbmzmduojlxdzfgmolly.supabase.co";
-const S_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJibXptZHVvamx4ZHpmZ21vbGx5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM4MTY3NDMsImV4cCI6MjA4OTM5Mjc0M30.plryXDY6786ct7TLIlh-DGWiCWi8OtQA9Te7LgsHz3E";
+// --- CONFIGURATION SUPABASE / FIREBASE ---
+const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'objective-master-2026';
 
-const MULTIPLIER_HT = 1.2;
-const RATIO_BR_NET = 282.16 / 3018.60;
-const RATIO_LDR_NET = 2181.10 / 47557.29;
+// --- COMPOSANT D'INPUT HYBRIDE (Clavier + Curseur) ---
+const InputControl = ({ label, value, onChange, min, max, step = 1, suffix = "", color = "blue", disabled = false, isLarge = false }) => {
+  const colorMap = {
+    blue: { accent: "accent-blue-600", text: "text-blue-600", bg: "bg-blue-50/50", border: "border-blue-100" },
+    orange: { accent: "accent-orange-500", text: "text-orange-600", bg: "bg-orange-50/50", border: "border-orange-100" },
+    indigo: { accent: "accent-indigo-600", text: "text-indigo-600", bg: "bg-indigo-50/50", border: "border-indigo-100" },
+    emerald: { accent: "accent-emerald-600", text: "text-emerald-600", bg: "bg-emerald-50/50", border: "border-emerald-100" }
+  };
+  const theme = colorMap[color];
 
-export default function SimulateurObjectifPage() {
-  const [authorized, setAuthorized] = useState(false);
-  
-  // États des Inputs
-  const [targetIncome, setTargetIncome] = useState('');
-  const [personalSv, setPersonalSv] = useState(0);
-  const [n1Clients, setN1Clients] = useState(0);
-  const [n1SvPerClient, setN1SvPerClient] = useState(0);
+  return (
+    <div className={`space-y-4 mb-8 transition-all duration-300 ${disabled ? 'opacity-30 grayscale pointer-events-none' : 'opacity-100'}`}>
+      <div className="flex justify-between items-center">
+        <label className="text-[12px] font-black text-slate-500 uppercase tracking-[0.1em] italic leading-none">{label}</label>
+        <div className={`flex items-center gap-3 ${theme.bg} ${isLarge ? 'px-6 py-3' : 'px-4 py-2'} rounded-2xl border ${theme.border} shadow-sm`}>
+          <input 
+            type="number" value={value || ""} placeholder="0"
+            onChange={(e) => onChange(Number(e.target.value))}
+            className={`bg-transparent text-right font-black outline-none italic ${theme.text} ${isLarge ? 'w-40 text-3xl' : 'w-24 text-xl'}`}
+          />
+          <span className={`font-black text-slate-400 italic ${isLarge ? 'text-sm' : 'text-[11px]'}`}>{suffix}</span>
+        </div>
+      </div>
+      <div className="px-1">
+        <input 
+          type="range" min={min} max={max} step={step} value={value || 0} 
+          onChange={(e) => onChange(Number(e.target.value))}
+          className={`w-full h-2.5 bg-slate-200 rounded-full appearance-none cursor-pointer transition-all ${theme.accent} hover:scale-[1.01]`}
+        />
+      </div>
+    </div>
+  );
+};
+
+export default function ObjectiveSimulator() {
+  // --- Constantes 2026 ---
+  const VALEUR_PIVOT_5PCT = 0.0457818; 
+
+  // --- États ---
+  const [user, setUser] = useState(null);
+  const [targetIncome, setTargetIncome] = useState("");
+  const [basketSv, setBasketSv] = useState(0);
+  const [l1Clients, setL1Clients] = useState(0);
+  const [l2Clients, setL2Clients] = useState(0);
+  const [buildGsv, setBuildGsv] = useState(0); 
   const [l1Partners, setL1Partners] = useState(0);
-  const [l1PartnerVolume, setL1PartnerVolume] = useState(0);
-  const [n2Clients, setN2Clients] = useState(0);
-  const [n2SvPerClient, setN2SvPerClient] = useState(0);
-  const [leadingVolume, setLeadingVolume] = useState(0);
+  const [g1Volume, setG1Volume] = useState(0);
+  const [depthVolume, setDepthVolume] = useState(0);
 
-  // --- SÉCURITÉ ---
+  // --- Auth & Sync Supabase (Automatique sans bouton) ---
   useEffect(() => {
-    const checkAuth = async () => {
-      try {
-        const { createClient } = await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm');
-        const supabase = createClient(S_URL, S_KEY);
-        const { data: { session } } = await supabase.auth.getSession();
-        
-        const isDev = window.location.hostname.includes('localhost') || 
-                      window.location.hostname.includes('goog') ||
-                      window.location.protocol === 'blob:';
-
-        if (!session && !isDev) {
-          window.location.href = window.location.origin;
-        } else {
-          setAuthorized(true);
-        }
-      } catch (e) { console.warn("Security initialisation"); }
+    const initAuth = async () => {
+      if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+        await signInWithCustomToken(auth, __initial_auth_token);
+      } else {
+        await signInAnonymously(auth);
+      }
     };
-    checkAuth();
+    initAuth();
+    const unsubscribe = onAuthStateChanged(auth, setUser);
+    return () => unsubscribe();
   }, []);
 
-  // --- CALCULS ---
-  const getBracket = (sv) => {
-    const val = Number(sv) || 0;
-    if (val < 250) return { s: 0.04, r: 0.00 };
-    if (val < 500) return { s: 0.04, r: 0.04 };
-    if (val < 2500) return { s: 0.08, r: 0.12 };
-    if (val < 10000) return { s: 0.12, r: 0.16 };
-    return { s: 0.20, r: 0.24 };
-  };
+  useEffect(() => {
+    if (!user) return;
+    const docRef = doc(db, 'artifacts', appId, 'users', user.uid, 'simulations', 'objective');
+    const unsub = onSnapshot(docRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const d = docSnap.data();
+        setTargetIncome(d.targetIncome || "");
+        setBasketSv(d.basketSv || 0);
+        setL1Clients(d.l1Clients || 0);
+        setL2Clients(d.l2Clients || 0);
+        setBuildGsv(d.buildGsv || 0);
+        setL1Partners(d.l1Partners || 0);
+        setG1Volume(d.g1Volume || 0);
+        setDepthVolume(d.depthVolume || 0);
+      }
+    });
+    return () => unsub();
+  }, [user]);
 
-  const calculate = () => {
-    const svN1 = n1Clients * n1SvPerClient;
-    const svL1 = l1Partners * l1PartnerVolume;
-    const svN2 = n2Clients * n2SvPerClient;
-    const networkSv = svL1 + svN2;
-    const totalGsv = personalSv + svN1 + networkSv;
+  // --- Logique de Calcul ---
+  const results = useMemo(() => {
+    const l1Sv = l1Clients * (basketSv || 75);
+    const l2Sv = l2Clients * (basketSv || 75);
+    const totalGsv = Math.max(l1Sv + l2Sv, buildGsv);
 
-    const isBrQualified = totalGsv >= 2000;
-    const isLeadingQualified = totalGsv >= 3000;
+    const sellL1 = l1Sv * VALEUR_PIVOT_5PCT;
+    const sellL2 = l1Sv >= 500 ? l2Sv * VALEUR_PIVOT_5PCT : 0;
 
-    const bracket = getBracket(svN1);
-    const gainSelling = (svN1 * MULTIPLIER_HT) * bracket.s;
-    const gainReferring = (networkSv * MULTIPLIER_HT) * bracket.r;
+    const getBuildingRate = (gsv) => {
+      if (gsv >= 10000) return 0.25;
+      if (gsv >= 5000) return 0.20;
+      if (gsv >= 3000) return 0.15;
+      if (gsv >= 2000) return 0.10;
+      return 0;
+    };
 
-    let brTotal = 0; let brRate = 0;
-    if(totalGsv >= 3000) { brRate = 0.10; brTotal = totalGsv * RATIO_BR_NET; }
-    else if(totalGsv >= 2000) { brRate = 0.05; brTotal = totalGsv * (RATIO_BR_NET / 2); }
+    const buildRate = getBuildingRate(totalGsv);
+    const buildBonus = totalGsv * (VALEUR_PIVOT_5PCT * (buildRate / 0.05));
 
-    const leaderTotal = isLeadingQualified ? (leadingVolume * RATIO_LDR_NET) : 0;
-    const grandTotal = gainSelling + gainReferring + brTotal + leaderTotal;
+    const isLeadQualified = totalGsv >= 3000;
+    const leadG1Bonus = isLeadQualified ? g1Volume * (VALEUR_PIVOT_5PCT * (0.10 / 0.05)) : 0;
+    const leadDepthBonus = isLeadQualified ? depthVolume * VALEUR_PIVOT_5PCT : 0;
 
-    const target = parseFloat(targetIncome) || 0;
-    const progressPercent = target > 0 ? Math.min(100, Math.round((grandTotal / target) * 100)) : 0;
+    const grandTotal = sellL1 + sellL2 + buildBonus + leadG1Bonus + leadDepthBonus;
 
     return {
-      svN1, networkSv, totalGsv, isBrQualified, isLeadingQualified,
-      bracket, gainSelling, gainReferring, brTotal, brRate, 
-      leaderTotal, grandTotal, progressPercent
+      totalGsv, sellL1, sellL2, buildBonus, leadG1Bonus, leadDepthBonus,
+      grandTotal, buildRate: Math.round(buildRate * 100), isLeadQualified
     };
-  };
+  }, [basketSv, l1Clients, l2Clients, buildGsv, g1Volume, depthVolume]);
 
-  const results = calculate();
-
-  const handleAutoRoute = () => {
-    const income = parseFloat(targetIncome) || 0;
-    if(income <= 0) return;
-
-    setPersonalSv(200);
-    setN1Clients(15);
-    setN1SvPerClient(100);
-    setL1Partners(4);
-    setL1PartnerVolume(500);
-    setN2Clients(20);
-    setN2SvPerClient(50);
-
-    const fixedGain = (1500 * 1.2 * 0.12) + (3000 * 1.2 * 0.16) + (4700 * RATIO_BR_NET);
-    const needed = Math.max(0, Math.ceil((income - fixedGain) / RATIO_LDR_NET));
-    setLeadingVolume(needed);
+  const autoPlanify = () => {
+    const goal = Number(targetIncome) || 0;
+    if (goal === 0) return;
+    setBasketSv(150);
+    if (goal <= 500) {
+      setL1Clients(10); setL2Clients(10); setBuildGsv(3000); setL1Partners(1); setG1Volume(0); setDepthVolume(0);
+    } else if (goal <= 1500) {
+      setL1Clients(15); setL2Clients(20); setBuildGsv(5000); setL1Partners(3); setG1Volume(4000); setDepthVolume(0);
+    } else {
+      setL1Clients(25); setL2Clients(40); setBuildGsv(10000); setL1Partners(6); setG1Volume(15000); setDepthVolume(50000);
+    }
   };
 
   const resetAll = () => {
-    setTargetIncome(''); setPersonalSv(0); setN1Clients(0); setN1SvPerClient(0);
-    setL1Partners(0); setL1PartnerVolume(0); setN2Clients(0); setN2SvPerClient(0);
-    setLeadingVolume(0);
+    setTargetIncome(""); setL1Clients(0); setL2Clients(0); setBuildGsv(0);
+    setL1Partners(0); setG1Volume(0); setDepthVolume(0); setBasketSv(0);
   };
 
-  const formatEuro = (v) => new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(v);
+  const progress = Number(targetIncome) > 0 ? Math.min(100, (results.grandTotal / Number(targetIncome)) * 100) : 0;
 
-  if (!authorized) return null;
+  const getRankInfo = (lts) => {
+    const config = [
+      { name: "Brand Representative", color: "text-slate-400", bg: "bg-slate-50", border: "border-slate-200" },
+      { name: "Gold", color: "text-amber-600", bg: "bg-amber-50", border: "border-amber-200" },
+      { name: "Lapis", color: "text-blue-800", bg: "bg-blue-50", border: "border-blue-200" },
+      { name: "Ruby", color: "text-rose-600", bg: "bg-rose-50", border: "border-rose-200" },
+      { name: "Emerald", color: "text-emerald-600", bg: "bg-emerald-50", border: "border-emerald-200" },
+      { name: "Diamond", color: "text-slate-600", bg: "bg-slate-100", border: "border-slate-300" },
+      { name: "Blue Diamond", color: "text-sky-500", bg: "bg-sky-50", border: "border-sky-200" }
+    ];
+    return config[Math.min(lts, 6)];
+  };
+
+  const currentRank = getRankInfo(l1Partners);
 
   return (
-    <div className="p-4 md:p-8 bg-[#FBFBFA] min-h-screen text-[#1E293B] italic font-sans" style={{ fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
-      <div className="max-w-6xl mx-auto space-y-10">
+    <div className="min-h-screen bg-[#F8FAFC] p-4 md:p-10 font-sans text-slate-800 italic selection:bg-blue-100">
+      <div className="max-w-7xl mx-auto">
         
-        {/* Navigation & Titre */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
-            <div className="text-left border-l-4 border-indigo-600 pl-6">
-                <button onClick={() => window.location.href = window.location.origin} className="flex items-center gap-2 text-[10px] font-black uppercase text-slate-400 hover:text-indigo-600 transition-all mb-2">
-                    <ArrowLeft size={14} /> Retour au portail
-                </button>
-                <h1 className="text-3xl font-black uppercase tracking-tighter">Simulateur d'objectif</h1>
-                <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">Calculateur Stratégique de Commissions 2026</p>
+        {/* HEADER */}
+        <div className="flex flex-col lg:flex-row gap-12 items-start justify-between mb-16">
+          <div className="flex-1 space-y-8 w-full">
+            <div className="flex justify-between items-center">
+              <div className="border-l-[10px] border-blue-600 pl-8">
+                <h1 className="text-5xl md:text-6xl font-black uppercase tracking-tighter text-slate-900 leading-[0.9]">
+                  Simulateur <br/> d'Objectif
+                </h1>
+                <p className="text-[12px] font-black text-slate-400 uppercase tracking-[0.5em] mt-4 italic leading-none">Intelligence Performance 2026</p>
+              </div>
+              <button onClick={resetAll} className="flex items-center gap-3 px-6 py-4 bg-red-600 text-white rounded-2xl text-[12px] font-black uppercase tracking-widest transition-all shadow-xl shadow-red-200">
+                <RefreshCcw size={18} /> Reset
+              </button>
             </div>
-            <button onClick={resetAll} className="w-fit p-4 bg-white text-slate-400 hover:text-red-500 rounded-3xl transition-all shadow-sm border border-slate-100 flex items-center gap-3 font-black text-[10px] uppercase italic">
-                <RotateCcw size={16} /> Réinitialiser
-            </button>
+
+            <div className="bg-white p-10 rounded-[3.5rem] shadow-2xl border border-slate-100 flex flex-wrap items-center gap-10">
+              <div className="flex-1 min-w-[280px]">
+                <label className="text-[12px] font-black uppercase text-slate-400 mb-4 block italic tracking-widest leading-none">Quel est votre but financier mensuel ?</label>
+                <div className="flex items-baseline gap-6 border-b-4 border-slate-50 pb-4 focus-within:border-blue-600 transition-all">
+                  <input 
+                    type="number" value={targetIncome} placeholder="0"
+                    onChange={(e) => setTargetIncome(e.target.value)}
+                    className="text-7xl font-black bg-transparent outline-none w-full italic tabular-nums"
+                  />
+                  <span className="text-4xl font-black text-slate-200 italic">€</span>
+                </div>
+              </div>
+              <button onClick={autoPlanify} className="bg-blue-600 text-white px-10 py-8 rounded-[2rem] font-black uppercase text-[13px] tracking-[0.2em] shadow-2xl shadow-blue-200 flex items-center gap-4 transition-transform hover:scale-105 active:scale-95">
+                <Sparkles size={24} /> Décliner le plan
+              </button>
+            </div>
+          </div>
+
+          {/* ROUE DE PROGRESSION CIRCULAIRE */}
+          <div className="bg-white p-12 rounded-[5rem] shadow-2xl shadow-slate-200/80 border border-slate-100 relative flex items-center justify-center group">
+            <svg height="320" width="320" className="transform -rotate-90">
+              <circle stroke="#F1F5F9" fill="transparent" strokeWidth="24" r="135" cx="160" cy="160" />
+              <circle
+                stroke={progress >= 100 ? "#10b981" : "#2563EB"}
+                fill="transparent" strokeWidth="24"
+                strokeDasharray={`${2 * Math.PI * 135}`}
+                style={{ strokeDashoffset: (2 * Math.PI * 135) - (progress / 100) * (2 * Math.PI * 135), transition: 'stroke-dashoffset 1.5s ease' }}
+                strokeLinecap="round" r="135" cx="160" cy="160"
+              />
+            </svg>
+            <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
+               <Wallet size={24} className="text-blue-500 mb-4" />
+               <span className="text-[14px] font-black text-slate-300 uppercase italic tracking-[0.3em] mb-1">Gain Estimé</span>
+               <span className="text-7xl font-black text-slate-900 tracking-tighter tabular-nums">{results.grandTotal.toFixed(0)}€</span>
+               <span className={`text-[15px] font-black mt-4 px-6 py-1.5 rounded-full border-2 ${progress >= 100 ? 'bg-emerald-50 border-emerald-100 text-emerald-600' : 'bg-blue-50 border-blue-100 text-blue-600'}`}>
+                 {progress.toFixed(0)}% du but
+               </span>
+            </div>
+          </div>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 pb-40">
+          
+          {/* COLONNE GAUCHE - PARAMÈTRES */}
+          <div className="lg:col-span-8 space-y-8">
             
-            {/* SECTION GAUCHE : PARAMÈTRES */}
-            <div className="lg:col-span-7 space-y-8">
-                
-                {/* 1. OBJECTIF NET */}
-                <div className="bg-indigo-600 p-10 rounded-[3.5rem] text-white shadow-2xl relative overflow-hidden group">
-                    <div className="absolute top-0 right-0 p-12 opacity-10 rotate-12 group-hover:scale-110 transition-transform duration-1000">
-                        <Trophy size={200} />
-                    </div>
-                    <div className="relative z-10 flex flex-col gap-6 text-left">
-                        <div className="flex justify-between items-center italic mb-4 leading-none">
-                            <label className="text-[10px] font-black uppercase tracking-widest opacity-60 flex items-center gap-2">
-                                <Zap size={14}/> Revenu Mensuel Souhaité
-                            </label>
-                            <button onClick={handleAutoRoute} className="px-5 py-2.5 bg-white text-indigo-600 rounded-2xl text-[10px] font-black uppercase shadow-lg hover:scale-105 transition-transform active:scale-95">
-                                Tracer ma route
-                            </button>
-                        </div>
-                        <div className="flex items-baseline gap-4 border-b-2 border-indigo-400 pb-2">
-                            <input type="number" value={targetIncome} onChange={(e) => setTargetIncome(e.target.value)} className="text-6xl font-black bg-transparent outline-none w-full italic tabular-nums text-left placeholder:text-white/20" placeholder="0" />
-                            <span className="text-3xl font-black opacity-40">€</span>
-                        </div>
-                    </div>
-                </div>
-
-                {/* 2. VOLUME PROPRE */}
-                <div className="bg-white p-8 rounded-[3rem] border border-slate-100 shadow-sm space-y-6 text-left">
-                    <div className="flex justify-between items-center leading-none">
-                        <h3 className="font-black italic uppercase text-indigo-900 flex items-center gap-3">
-                            <Star size={20} className="text-indigo-600 fill-indigo-100"/> 1. Volume Propre
-                        </h3>
-                        <span className="text-2xl font-black italic tabular-nums text-indigo-600">{personalSv} SV</span>
-                    </div>
-                    <input type="range" min="0" max="2000" step="50" value={personalSv} onChange={(e) => setPersonalSv(parseInt(e.target.value))} className="w-full h-2 rounded-full appearance-none bg-slate-100 accent-indigo-600" />
-                </div>
-
-                {/* 3. CLIENTS N1 */}
-                <div className="bg-white p-8 rounded-[3.5rem] border border-indigo-100 shadow-sm space-y-8 text-left">
-                    <div className="flex justify-between items-center">
-                        <div className="space-y-1">
-                            <h3 className="font-black italic uppercase text-indigo-900 flex items-center gap-3 leading-none">
-                                <User size={20} className="text-indigo-600"/> 2. Mes Clients (N1)
-                            </h3>
-                            <p className="text-2xl font-black text-indigo-600 tabular-nums ml-8">{results.svN1.toLocaleString()} SV</p>
-                        </div>
-                        <div className="bg-indigo-600 text-white px-4 py-1.5 rounded-full text-[10px] font-black uppercase shadow-sm italic ring-4 ring-indigo-50">
-                            Selling: {Math.round(results.bracket.s * 100)}%
-                        </div>
-                    </div>
-                    <div className="grid md:grid-cols-2 gap-8 border-t border-slate-50 pt-6">
-                        <div className="space-y-4">
-                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none italic">Nb de clients</p>
-                            <p className="text-3xl font-black italic text-indigo-600 tabular-nums leading-none">{n1Clients}</p>
-                            <input type="range" min="0" max="50" value={n1Clients} onChange={(e) => setN1Clients(parseInt(e.target.value))} className="w-full h-2 rounded-full appearance-none bg-slate-100 accent-indigo-400" />
-                        </div>
-                        <div className="space-y-4">
-                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none italic">Volume / client</p>
-                            <p className="text-3xl font-black italic text-indigo-600 tabular-nums leading-none">{n1SvPerClient} SV</p>
-                            <input type="range" min="0" max="500" step="5" value={n1SvPerClient} onChange={(e) => setN1SvPerClient(parseInt(e.target.value))} className="w-full h-2 rounded-full appearance-none bg-slate-100 accent-indigo-400" />
-                        </div>
-                    </div>
-                </div>
-
-                {/* 4. LEVIER RÉSEAU */}
-                <div className="bg-blue-50/50 p-8 rounded-[3.5rem] border border-blue-100 shadow-sm space-y-8 text-left">
-                    <div className="flex justify-between items-center">
-                        <div className="space-y-1">
-                            <h3 className="font-black italic uppercase text-blue-900 flex items-center gap-3 leading-none">
-                                <Globe size={20} className="text-blue-600"/> 3. Levier Réseau (L1 & N2)
-                            </h3>
-                            <p className="text-2xl font-black text-blue-600 tabular-nums ml-8">{results.networkSv.toLocaleString()} SV</p>
-                        </div>
-                        <div className="bg-blue-600 text-white px-4 py-1.5 rounded-full text-[10px] font-black uppercase shadow-lg italic ring-4 ring-blue-50">
-                            Referring: {Math.round(results.bracket.r * 100)}%
-                        </div>
-                    </div>
-                    <div className="grid md:grid-cols-2 gap-6 border-t border-blue-100 pt-6">
-                        <div className="bg-white p-6 rounded-3xl border border-blue-100 shadow-sm space-y-4">
-                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none italic">Partenaires Directs (L1)</p>
-                            <p className="text-3xl font-black italic text-blue-600 tabular-nums leading-none">{l1Partners}</p>
-                            <input type="range" min="0" max="20" value={l1Partners} onChange={(e) => setL1Partners(parseInt(e.target.value))} className="w-full h-2 rounded-full appearance-none bg-slate-100 accent-blue-600" />
-                            <div className="flex justify-between items-center">
-                                <p className="text-[9px] font-black text-slate-300 uppercase italic">Vol / Partenaire</p>
-                                <p className="text-xs font-black text-slate-400 uppercase">{l1PartnerVolume} SV</p>
-                            </div>
-                            <input type="range" min="0" max="2000" step="50" value={l1PartnerVolume} onChange={(e) => setL1PartnerVolume(parseInt(e.target.value))} className="w-full h-2 rounded-full appearance-none bg-slate-100 accent-blue-300" />
-                        </div>
-                        <div className="bg-white p-6 rounded-3xl border border-blue-100 shadow-sm space-y-4">
-                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none italic">Clients Réseau (N2)</p>
-                            <p className="text-3xl font-black italic text-blue-600 tabular-nums leading-none">{n2Clients}</p>
-                            <input type="range" min="0" max="100" value={n2Clients} onChange={(e) => setN2Clients(parseInt(e.target.value))} className="w-full h-2 rounded-full appearance-none bg-slate-100 accent-blue-500" />
-                            <div className="flex justify-between items-center">
-                                <p className="text-[9px] font-black text-slate-300 uppercase italic">Vol / Client N2</p>
-                                <p className="text-xs font-black text-slate-400 uppercase">{n2SvPerClient} SV</p>
-                            </div>
-                            <input type="range" min="0" max="500" step="5" value={n2SvPerClient} onChange={(e) => setN2SvPerClient(parseInt(e.target.value))} className="w-full h-2 rounded-full appearance-none bg-slate-100 accent-blue-300" />
-                        </div>
-                    </div>
-                </div>
-
-                {/* 5. CERCLE GROUPE (SÉCURITÉ) */}
-                <div className={`p-8 rounded-[3.5rem] border-2 transition-all duration-700 italic text-left shadow-xl ${results.isLeadingQualified ? 'bg-emerald-50 border-emerald-200' : 'bg-amber-50 border-amber-100'}`}>
-                    <div className="flex justify-between items-center relative z-10">
-                        <div className="space-y-1">
-                            <h3 className="font-black italic uppercase text-lg text-slate-900 leading-tight italic">5. Cercle Groupe (GSV)</h3>
-                            <div className="flex items-center gap-2">
-                                {results.isLeadingQualified ? <CheckCircle2 size={16} className="text-emerald-600"/> : <AlertTriangle size={16} className="text-amber-500"/>}
-                                <p className={`text-[10px] font-black uppercase tracking-widest ${results.isLeadingQualified ? 'text-emerald-600' : 'text-amber-600'}`}>
-                                    {results.isLeadingQualified ? 'Qualification Leader OK' : 'Seuil 3000 SV Requis'}
-                                </p>
-                            </div>
-                        </div>
-                        <div className="text-right italic">
-                            <p className={`text-4xl font-black tabular-nums leading-none ${results.isLeadingQualified ? 'text-emerald-600' : 'text-amber-600'}`}>
-                                {results.totalGsv.toLocaleString()}
-                            </p>
-                            <p className="text-[10px] font-black uppercase mt-1 opacity-40 italic">SV Global</p>
-                        </div>
-                    </div>
-                    {!results.isLeadingQualified && (
-                        <div className="mt-6 p-4 bg-white/50 rounded-2xl border border-dashed border-amber-200 flex items-center gap-3 italic font-bold text-amber-700 text-[11px]">
-                            Manque <span className="font-black">{(3000 - results.totalGsv).toLocaleString()} SV</span> pour débloquer l'Organisation.
-                        </div>
-                    )}
-                </div>
-
-                {/* 6. ORGANISATION (OVERLAY) */}
-                <div className={`p-8 rounded-[4rem] border-2 transition-all duration-500 italic relative overflow-hidden shadow-2xl text-left ${results.isLeadingQualified ? 'bg-white border-purple-100' : 'bg-slate-100 border-slate-200 opacity-60 grayscale'}`}>
-                    {!results.isLeadingQualified && (
-                        <div className="absolute inset-0 z-20 bg-slate-900/5 backdrop-blur-[2px] flex items-center justify-center">
-                            <div className="bg-white px-8 py-4 rounded-[2rem] shadow-2xl flex items-center gap-4 border border-slate-200">
-                                <Lock size={24} className="text-amber-500" strokeWidth={3} />
-                                <span className="text-xs font-black uppercase text-slate-700 tracking-widest italic">Qualification Leader Requise</span>
-                            </div>
-                        </div>
-                    )}
-                    <div className="flex justify-between items-start mb-8 text-left italic">
-                        <div className="flex gap-4 italic text-left">
-                            <div className={`p-3 rounded-2xl text-white italic shadow-lg transition-all duration-500 ${results.isLeadingQualified ? 'bg-purple-600' : 'bg-slate-400'}`}>
-                                {leadingVolume >= 5000 ? <Medal size={24}/> : <Trophy size={24}/>}
-                            </div>
-                            <div>
-                                <h3 className="font-black italic uppercase text-lg text-slate-900 leading-tight italic">6. Organisation</h3>
-                                <p className={`text-[10px] uppercase font-bold mt-1 leading-none italic ${results.isLeadingQualified ? 'text-purple-600' : 'text-slate-400'}`}>
-                                    {results.isLeadingQualified ? (leadingVolume >= 5000 ? 'Leader Actif' : 'Qualification OK') : 'Section Verrouillée'} (5%)
-                                </p>
-                            </div>
-                        </div>
-                        <div className="text-right italic">
-                            <p className={`text-3xl font-black italic tabular-nums leading-none ${results.isLeadingQualified ? 'text-purple-600' : 'text-slate-400'}`}>
-                                {leadingVolume.toLocaleString()} SV
-                            </p>
-                            <p className="text-[9px] font-black text-slate-300 uppercase mt-1 italic">Volume Profondeur</p>
-                        </div>
-                    </div>
-                    <input type="range" min="0" max="500000" step="1000" value={leadingVolume} disabled={!results.isLeadingQualified} onChange={(e) => setLeadingVolume(parseInt(e.target.value))} className="w-full h-2 rounded-full appearance-none bg-slate-100 accent-purple-600 cursor-pointer" />
-                </div>
+            <div className="bg-white p-10 rounded-[3.5rem] shadow-xl border border-slate-100 relative overflow-hidden">
+               <div className="absolute top-0 left-0 w-2 h-full bg-orange-400"></div>
+               <div className="flex items-center gap-5 mb-12">
+                 <div className="p-4 bg-orange-50 rounded-3xl text-orange-500 shadow-inner"><ShoppingCart size={28}/></div>
+                 <h3 className="font-black uppercase text-xl text-slate-800 italic">Sell - Ventes Directes</h3>
+               </div>
+               <InputControl label="Panier Moyen Client" value={basketSv} onChange={setBasketSv} min={0} max={500} suffix="SV" color="orange" isLarge={true} />
+               <div className="grid grid-cols-1 md:grid-cols-2 gap-x-16 pt-6 border-t border-slate-50">
+                 <InputControl label="Clients Ligne 1" value={l1Clients} onChange={setL1Clients} min={0} max={50} suffix="Personnes" color="orange" />
+                 <InputControl label="Clients Ligne 2" value={l2Clients} onChange={setL2Clients} min={0} max={100} suffix="Personnes" color="orange" />
+               </div>
             </div>
 
-            {/* SECTION DROITE : BILAN COMMISSIONS */}
-            <div className="lg:col-span-5 italic">
-                <div className="bg-[#0f172a] rounded-[4rem] p-10 text-white shadow-2xl min-h-[850px] flex flex-col text-left italic border border-white/5 sticky top-8">
-                    <div className="flex-1 space-y-10 italic">
-                        <div className="flex items-center gap-4 italic leading-none">
-                            <div className="w-10 h-10 bg-white/5 rounded-2xl flex items-center justify-center text-indigo-400 font-black italic">€</div>
-                            <h3 className="font-black uppercase tracking-[0.3em] text-[10px] text-slate-500 italic">Bilan Commissions Net</h3>
-                        </div>
-
-                        <div className="space-y-8 italic">
-                            <div className="flex justify-between items-center italic border-b border-white/5 pb-6">
-                                <div className="leading-none italic"><p className="text-slate-400 font-bold text-[10px] uppercase mb-1 italic">Selling Bonus (N1)</p><p className="text-sm font-bold text-slate-200 italic">Ventes Directes</p></div>
-                                <p className="text-2xl font-black italic tabular-nums text-indigo-400">{formatEuro(results.gainSelling)}</p>
-                            </div>
-                            <div className="flex justify-between items-center italic border-b border-white/5 pb-6">
-                                <div className="leading-none italic"><p className="text-slate-400 font-bold text-[10px] uppercase mb-1 italic">Referring Bonus (Réseau)</p><p className="text-sm font-bold text-slate-200 italic">L1 + CN2</p></div>
-                                <p className="text-2xl font-black italic tabular-nums text-blue-400">{formatEuro(results.gainReferring)}</p>
-                            </div>
-                            
-                            <div className={`p-6 rounded-[2.5rem] border-2 transition-all italic text-left ${results.isBrQualified ? 'bg-white/5 border-emerald-500/20 opacity-100 shadow-emerald-900/10' : 'opacity-20 border-white/5 grayscale'}`}>
-                                <div className="flex justify-between items-center italic">
-                                    <div className="leading-none italic"><p className="text-emerald-400 font-black text-[10px] uppercase mb-1 italic">Building Bonus</p><p className="text-lg font-bold italic text-white italic">{Math.round(results.brRate * 100)}% Validé</p></div>
-                                    <p className="text-2xl font-black italic text-emerald-400 tabular-nums">{formatEuro(results.brTotal)}</p>
-                                </div>
-                            </div>
-
-                            <div className={`p-6 rounded-[2.5rem] border-2 transition-all italic text-left ${results.isLeadingQualified ? 'bg-white/5 border-purple-500/20 opacity-100' : 'opacity-10 border-white/5 grayscale'}`}>
-                                <div className="flex justify-between items-center italic">
-                                    <div className="leading-none italic"><p className="text-purple-400 font-black text-[10px] uppercase mb-1 italic">Leading Bonus</p><p className="text-lg font-bold italic text-white italic">Organisation</p></div>
-                                    <p className={`text-2xl font-black italic tabular-nums leading-none ${results.isLeadingQualified ? 'text-purple-400' : 'text-slate-600 line-through opacity-50'}`}>
-                                        {formatEuro(results.leaderTotal)}
-                                    </p>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div className="pt-10 border-t border-white/10 mt-auto text-left">
-                        <p className="text-slate-500 font-black uppercase text-[10px] mb-4 italic leading-none">Total Prévisionnel Net</p>
-                        <h4 className={`text-5xl font-black italic transition-all tabular-nums leading-none mb-10 ${results.grandTotal >= parseFloat(targetIncome) && parseFloat(targetIncome) > 0 ? 'text-emerald-400 drop-shadow-[0_0_15px_rgba(52,211,153,0.3)]' : 'text-white'}`}>
-                            {formatEuro(results.grandTotal)}
-                        </h4>
-                        
-                        <div className="space-y-4 italic">
-                            <div className="flex justify-between text-[10px] font-black uppercase tracking-widest text-slate-400 italic">
-                                <span>Objectif : {targetIncome || 0}€</span>
-                                <span>{results.progressPercent}%</span>
-                            </div>
-                            <div className="h-2 w-full bg-white/5 rounded-full overflow-hidden p-0 italic">
-                                <div className="h-full bg-gradient-to-r from-indigo-500 via-purple-500 to-emerald-500 rounded-full transition-all duration-1000" style={{ width: `${results.progressPercent}%` }}></div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+            <div className="bg-white p-10 rounded-[3.5rem] shadow-xl border border-slate-100 relative overflow-hidden">
+               <div className="absolute top-0 left-0 w-2 h-full bg-indigo-500"></div>
+               <div className="flex justify-between items-start mb-12">
+                 <div className="flex items-center gap-5">
+                   <div className="p-4 bg-indigo-50 rounded-3xl text-indigo-500 shadow-inner"><Zap size={28}/></div>
+                   <h3 className="font-black uppercase text-xl text-slate-800 italic">Build - Volume Groupe</h3>
+                 </div>
+                 <div className="text-right flex flex-col items-end">
+                   <span className="text-3xl font-black text-slate-800 tabular-nums">{results.totalGsv.toFixed(0)} SV</span>
+                   <span className="text-[11px] font-black text-indigo-600 bg-indigo-50 px-4 py-1.5 rounded-xl border border-indigo-100">Taux : {results.buildRate}%</span>
+                 </div>
+               </div>
+               <InputControl label="Volume Total du Groupe" value={buildGsv} onChange={setBuildGsv} min={0} max={40000} step={250} suffix="SV" color="indigo" isLarge={true} />
             </div>
+
+            <div className={`p-10 rounded-[3.5rem] shadow-xl border-2 transition-all duration-1000 relative overflow-hidden ${results.isLeadQualified ? `${currentRank.bg} ${currentRank.border}` : 'bg-slate-100 opacity-80'}`}>
+               <div className="absolute top-0 left-0 w-2 h-full bg-emerald-500 opacity-50"></div>
+               <div className="flex justify-between items-center mb-12">
+                 <div className="flex items-center gap-5">
+                   <div className={`p-4 rounded-3xl shadow-inner ${results.isLeadQualified ? 'bg-white text-emerald-600' : 'bg-slate-200 text-slate-400'}`}><Users size={28}/></div>
+                   <div>
+                     <h3 className={`font-black uppercase text-xl ${results.isLeadQualified ? 'text-slate-800' : 'text-slate-500'}`}>Lead - Structure</h3>
+                     {!results.isLeadQualified && <div className="flex items-center gap-2 text-amber-600 text-[10px] font-black uppercase mt-1"><Lock size={12}/> 3000 SV Requis</div>}
+                   </div>
+                 </div>
+                 <div className={`px-8 py-3 rounded-2xl text-[13px] font-black uppercase shadow-xl ${results.isLeadQualified ? `bg-white ${currentRank.color}` : 'bg-slate-200 text-slate-400'}`}>
+                   {currentRank.name}
+                 </div>
+               </div>
+               <InputControl label="Nombre de Lead Teams" value={l1Partners} onChange={setL1Partners} min={0} max={6} suffix="LT" color={results.isLeadQualified ? "emerald" : "blue"} />
+               <div className="grid grid-cols-1 md:grid-cols-2 gap-x-16 mt-12 pt-10 border-t border-slate-200/50">
+                 <InputControl label="Volume G1 (10%)" value={g1Volume} onChange={setG1Volume} min={0} max={100000} step={1000} suffix="SV" color="emerald" disabled={!results.isLeadQualified} />
+                 <InputControl label="Volume Profondeur (5%)" value={depthVolume} onChange={setDepthVolume} min={0} max={500000} step={5000} suffix="SV" color="emerald" disabled={!results.isLeadQualified} />
+               </div>
+            </div>
+          </div>
+
+          {/* COLONNE DROITE - SYNTHÈSE */}
+          <div className="lg:col-span-4">
+            <div className="bg-white rounded-[4rem] p-12 shadow-2xl border border-slate-100 sticky top-12 space-y-12 overflow-hidden">
+               <div className="flex items-center gap-4">
+                 <div className="w-1.5 h-8 bg-blue-600 rounded-full"></div>
+                 <h3 className="font-black uppercase text-[13px] tracking-[0.3em] text-slate-400 italic leading-none">Synthèse Gains</h3>
+               </div>
+               <div className="space-y-8">
+                  <div className="flex justify-between items-center border-b border-slate-50 pb-6">
+                     <span className="text-sm font-black text-slate-500 uppercase tracking-widest italic">Sell</span>
+                     <p className="text-3xl font-black text-orange-500 tabular-nums">{(results.sellL1 + results.sellL2).toFixed(2)}€</p>
+                  </div>
+                  <div className="flex justify-between items-center border-b border-slate-50 pb-6">
+                     <span className="text-sm font-black text-slate-500 uppercase tracking-widest italic">Build ({results.buildRate}%)</span>
+                     <p className="text-3xl font-black text-indigo-600 tabular-nums">{results.buildBonus.toFixed(2)}€</p>
+                  </div>
+                  <div className={`space-y-6 ${!results.isLeadQualified ? 'opacity-30' : ''}`}>
+                    <div className="flex justify-between items-center">
+                       <span className="text-sm font-black text-slate-500 uppercase tracking-widest italic">Lead G1</span>
+                       <p className="text-2xl font-black text-emerald-600 tabular-nums">{results.leadG1Bonus.toFixed(2)}€</p>
+                    </div>
+                    <div className="flex justify-between items-center">
+                       <span className="text-sm font-black text-slate-500 uppercase tracking-widest italic">Lead Profondeur</span>
+                       <p className="text-2xl font-black text-emerald-500 tabular-nums">{results.leadDepthBonus.toFixed(2)}€</p>
+                    </div>
+                  </div>
+               </div>
+
+               <div className="pt-6 space-y-6">
+                  <div className="p-8 rounded-[3rem] bg-slate-50 border border-slate-100 flex items-center gap-4">
+                    <ShieldCheck className="text-emerald-500" />
+                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Protection Subaru Supabase Active</span>
+                  </div>
+               </div>
+            </div>
+          </div>
         </div>
-
-        <footer className="mt-12 text-center text-[10px] font-black uppercase tracking-[0.3em] text-slate-400 opacity-50 italic">
-          Strategic Success Intelligence v2.1 © Strategy Partners
-        </footer>
       </div>
+      
+      <style>{`
+        input[type=range] { -webkit-appearance: none; width: 100%; height: 10px; background: #f1f5f9; border-radius: 50px; outline: none; }
+        input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; height: 32px; width: 32px; border-radius: 50%; background: #ffffff; border: 4px solid #3b52d4; box-shadow: 0 10px 25px rgba(59, 82, 212, 0.2); cursor: pointer; transition: transform 0.2s ease; }
+        input[type=range]:active::-webkit-slider-thumb { transform: scale(1.1); }
+        input[type=number]::-webkit-inner-spin-button, input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+        input[type=number] { -moz-appearance: textfield; }
+      `}</style>
     </div>
   );
 }

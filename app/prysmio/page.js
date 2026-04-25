@@ -1,465 +1,327 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Zap, LayoutDashboard, Target, TrendingUp, RefreshCw, 
-  Package, Layers, Lock, Unlock, Star, ArrowRight, 
-  AlertTriangle, CheckCircle2, Users, ShieldCheck, Crown
+  Package, Layers, Star, Lock, Unlock, ShieldCheck,
+  Users, ShoppingCart
 } from 'lucide-react';
+import { initializeApp } from 'firebase/app';
+import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
+import { getFirestore, doc, onSnapshot } from 'firebase/firestore';
 
-// --- CONFIGURATION TECHNIQUE ---
+// --- CONFIGURATION SUPABASE (PRODUITS & IDENTIFIANTS) ---
 const S_URL = "https://rbmzmduojlxdzfgmolly.supabase.co";
 const S_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJibXptZHVvamx4ZHpmZ21vbGx5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM4MTY3NDMsImV4cCI6MjA4OTM5Mjc0M30.plryXDY6786ct7TLIlh-DGWiCWi8OtQA9Te7LgsHz3E";
 
-const REFERRING_BA_FACTOR = 1.20; 
-const TEAM_YIELD_PER_SV = 0.045863;    
-const GROUP_YIELD_10_PER_SV = 0.0934733; 
-const GROUP_YIELD_5_PER_SV = GROUP_YIELD_10_PER_SV / 2;
+const GLOBAL_BASE_COEFF = 0.915636;
+const VALEUR_PIVOT_5PCT = 0.0457818; // Base : 1 SV * 0.915636 * 5%
+const LEAD_THRESHOLD = 3000;
+const L2_UNLOCK_THRESHOLD = 500;
 
 const PRODUCTS = [
-    { id: 1, name: "Beauty Focus (ADR)", clientHT: 52.32, baHT: 40.25, sv: 36.19 },
-    { id: 2, name: "Collagene (ADR)", clientHT: 76.71, baHT: 58.99, sv: 50.80 },
-    { id: 3, name: "LifePack", clientHT: 102.96, baHT: 79.04, sv: 67.45 },
-    { id: 4, name: "JVI (Gibi)", clientHT: 103.27, baHT: 79.49, sv: 66.50 }, 
-    { id: 5, name: "Beauty Duo ADR", clientHT: 123.79, baHT: 95.22, sv: 76.48 }, 
-    { id: 6, name: "LifePack MarinOmega ADR", clientHT: 130.22, baHT: 100.05, sv: 67.45 }, 
-    { id: 7, name: "Pack Essentiel ADR", clientHT: 211.81, baHT: 162.84, sv: 126.70 },
+  { id: 1, name: "Beauty Focus (ADR)", clientHT: 52.32, baHT: 40.25, sv: 36.19 },
+  { id: 2, name: "Collagène (ADR)", clientHT: 76.71, baHT: 58.99, sv: 50.80 },
+  { id: 3, name: "LifePack", clientHT: 102.96, baHT: 79.04, sv: 67.45 },
+  { id: 4, name: "JVI", clientHT: 103.27, baHT: 79.49, sv: 66.50 }, 
+  { id: 5, name: "Beauty Duo (ADR)", clientHT: 123.79, baHT: 95.22, sv: 76.48 }, 
+  { id: 6, name: "LifePack Marine Omega (ADR)", clientHT: 130.22, baHT: 100.05, sv: 67.45 }, 
+  { id: 7, name: "Pack Essentiel (ADR)", clientHT: 211.81, baHT: 162.84, sv: 126.70 },
 ];
 
-export default function PrysmIOPage() {
-  const [authorized, setAuthorized] = useState(false);
+// INITIALISATION FIREBASE CONFIG
+const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'prysm-2026-master';
+
+export default function PrysmioPage() {
   const [activeTab, setActiveTab] = useState('simulator');
-  const [quantities, setQuantities] = useState(Object.fromEntries(PRODUCTS.map(p => [p.id, ''])));
-  const [n2SV, setN2SV] = useState('');
-  const [groupSV, setGroupSV] = useState('');
-  const [orgSV, setOrgSV] = useState('');
+  const [quantities, setQuantities] = useState({});
+  const [n2Sv, setN2Sv] = useState(0);
+  const [buildGsv, setBuildGsv] = useState(0);
+  const [g1Sv, setG1Sv] = useState(0); 
+  const [teamSv, setTeamSv] = useState(0);
+  const [user, setUser] = useState(null);
 
-  // --- BLOC DE SÉCURITÉ ---
+  // AUTHENTIFICATION AUTOMATIQUE POUR SYNC
   useEffect(() => {
-    const checkAuth = async () => {
+    const initAuth = async () => {
       try {
-        const { createClient } = await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm');
-        const supabase = createClient(S_URL, S_KEY);
-        const { data: { session } } = await supabase.auth.getSession();
-        const isDev = window.location.hostname.includes('localhost') || 
-                      window.location.hostname.includes('goog') ||
-                      window.location.protocol === 'blob:';
-
-        if (!session && !isDev) {
-          window.location.href = window.location.origin;
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          await signInWithCustomToken(auth, __initial_auth_token);
         } else {
-          setAuthorized(true);
+          await signInAnonymously(auth);
         }
-      } catch (e) { console.warn("Security error"); }
+      } catch (err) { console.error("Erreur Auth:", err); }
     };
-    checkAuth();
+    initAuth();
+    const unsubscribe = onAuthStateChanged(auth, setUser);
+    return () => unsubscribe();
   }, []);
 
-  // --- MOTEUR DE CALCUL ---
-  const calculate = () => {
-    let directSV = 0;
-    let totalMargin = 0;
-    
+  // RÉCUPÉRATION DES DONNÉES CLOUD
+  useEffect(() => {
+    if (!user) return;
+    const docRef = doc(db, 'artifacts', appId, 'users', user.uid, 'simulations', 'prysm-current');
+    const unsub = onSnapshot(docRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const d = docSnap.data();
+        if (d.quantities) setQuantities(d.quantities);
+        setN2Sv(d.n2Sv || 0); 
+        setBuildGsv(d.buildGsv || 0);
+        setG1Sv(d.g1Sv || 0); 
+        setTeamSv(d.teamSv || 0);
+      }
+    }, (err) => console.warn("Sync Firestore Error:", err.message));
+    return () => unsub();
+  }, [user]);
+
+  // LOGIQUE DE CALCUL DU PLAN 2026
+  const stats = useMemo(() => {
+    let totalMargin = 0; 
+    let l1Sv = 0;
+
     PRODUCTS.forEach(p => {
-      const q = parseFloat(quantities[p.id]) || 0;
-      directSV += p.sv * q;
+      const q = quantities[p.id] || 0;
       totalMargin += (p.clientHT - p.baHT) * q;
+      l1Sv += p.sv * q;
     });
 
-    const n2 = parseFloat(n2SV) || 0;
-    const group = parseFloat(groupSV) || 0;
-    const org = parseFloat(orgSV) || 0;
+    const isL2Unlocked = l1Sv >= L2_UNLOCK_THRESHOLD;
+    const bonusL1 = l1Sv * VALEUR_PIVOT_5PCT;
+    const bonusL2 = isL2Unlocked ? (n2Sv * VALEUR_PIVOT_5PCT) : 0;
 
-    const totalVolumeDirect = directSV + n2;
-    const isGroupUnlocked = totalVolumeDirect >= 2000;
-    const canLead = isGroupUnlocked && group >= 3000;
-
-    let sellRate = 0.04;
-    let refRate = 0;
-    if (directSV >= 10000) { sellRate = 0.20; refRate = 0.24; }
-    else if (directSV >= 2500) { sellRate = 0.16; refRate = 0.20; }
-    else if (directSV >= 500) { sellRate = 0.08; refRate = 0.12; }
-    else if (directSV >= 250) { sellRate = 0.04; refRate = 0.04; }
-
-    const buildingRate = isGroupUnlocked ? (group >= 3000 ? 0.10 : 0.05) : 0;
+    // Volume Groupe = cumul des ventes directes + partenaires ou valeur du curseur
+    const totalGsv = Math.max(l1Sv + n2Sv, buildGsv);
     
-    const sellingBonus = directSV * REFERRING_BA_FACTOR * sellRate;
-    const referringBonus = n2 * REFERRING_BA_FACTOR * refRate;
-    const buildingBonus = group * (buildingRate === 0.10 ? GROUP_YIELD_10_PER_SV : (buildingRate === 0.05 ? GROUP_YIELD_5_PER_SV : 0));
-    const leadingBonus = canLead ? (org * TEAM_YIELD_PER_SV) : 0;
+    const getBuildRate = (gsv) => {
+      if (gsv >= 10000) return 0.25;
+      if (gsv >= 5000) return 0.20;
+      if (gsv >= 3000) return 0.15;
+      if (gsv >= 2000) return 0.10;
+      return 0;
+    };
+
+    const buildRate = getBuildRate(totalGsv);
+    const bonusBuild = totalGsv * (VALEUR_PIVOT_5PCT * (buildRate / 0.05));
+
+    // QUALIFICATION LEAD REQUISE : 3000 GSV
+    const isLeadQualified = totalGsv >= LEAD_THRESHOLD;
     
-    const totalGains = totalMargin + sellingBonus + referringBonus + buildingBonus + leadingBonus;
+    // Bonus Lead (Forcés à 0 si non qualifié)
+    const bonusLead10 = isLeadQualified ? (g1Sv * VALEUR_PIVOT_5PCT * 2) : 0; // Bonus 10%
+    const bonusLead05 = isLeadQualified ? (teamSv * VALEUR_PIVOT_5PCT) : 0; // Bonus 5%
+
+    const grandTotal = totalMargin + bonusL1 + bonusL2 + bonusBuild + bonusLead10 + bonusLead05;
 
     return {
-      directSV, totalMargin, totalVolumeDirect, isGroupUnlocked, canLead,
-      sellRate, refRate, buildingRate, sellingBonus, referringBonus,
-      buildingBonus, leadingBonus, totalGains, group, org
+      totalMargin, l1Sv, n2Sv, g1Sv, teamSv, totalGsv, buildRate, 
+      bonusL1, bonusL2, bonusBuild, bonusLead10, bonusLead05, grandTotal,
+      isL2Unlocked, isLeadQualified
     };
-  };
-
-  const results = calculate();
+  }, [quantities, n2Sv, buildGsv, g1Sv, teamSv]);
 
   const resetAll = () => {
-    setQuantities(Object.fromEntries(PRODUCTS.map(p => [p.id, ''])));
-    setN2SV(''); setGroupSV(''); setOrgSV('');
-    setActiveTab('simulator');
+    setQuantities({}); setN2Sv(0); setBuildGsv(0); setG1Sv(0); setTeamSv(0); setActiveTab('simulator');
   };
 
-  const formatEuro = (v) => new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(v);
-
-  if (!authorized) return <div className="min-h-screen bg-slate-950 flex items-center justify-center text-white font-black italic uppercase tracking-widest text-xs">Initialisation PRYSM Engine...</div>;
-
   return (
-    <div className="text-slate-900 tracking-tight italic font-black uppercase p-4 md:p-8 lg:p-12 bg-[#f1f5f9] min-h-screen">
-      <div className="max-w-7xl mx-auto">
+    <div className="min-h-screen bg-slate-100 text-slate-900 italic font-black uppercase p-4 md:p-8 font-sans antialiased">
+      <div className="max-w-7xl mx-auto space-y-10">
         
-        {/* HEADER */}
-        <header className="mb-10 flex flex-col lg:flex-row lg:items-end justify-between gap-10">
+        {/* HEADER RÉCAPITULATIF */}
+        <header className="flex flex-col lg:flex-row lg:items-end justify-between gap-10">
           <div className="space-y-6">
             <div className="flex items-center gap-4">
               <div className="bg-indigo-600 p-3 rounded-2xl text-white shadow-xl rotate-3">
                 <Zap className="w-8 h-8" />
               </div>
               <div>
-                <h1 className="text-4xl md:text-5xl tracking-tighter leading-none italic font-black">
-                  PRYSM io <span className="text-indigo-600">Simulateur</span>
-                </h1>
-                <p className="text-[10px] text-slate-400 tracking-[0.4em] mt-2 italic font-black">Business Strategic Engine v4.7</p>
+                <h1 className="text-4xl md:text-5xl tracking-tighter leading-none italic font-black text-slate-950">PRYSM io <span className="text-indigo-600">Master</span></h1>
+                <p className="text-[10px] text-slate-400 tracking-[0.4em] mt-2 italic font-black">Performance Strategist 2026</p>
               </div>
             </div>
-            
-            <nav className="flex p-1.5 bg-white/80 backdrop-blur-xl rounded-[2rem] shadow-sm border border-white w-fit gap-1">
-              {[
-                {id:'simulator', icon:<LayoutDashboard size={16}/>, label:'Simulateur'},
-                {id:'roadmap', icon:<Target size={16}/>, label:'Objectifs'},
-                {id:'impact', icon:<TrendingUp size={16}/>, label:'Impact'}
-              ].map(tab => (
-                <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex items-center gap-3 px-6 py-3 rounded-2xl text-[10px] transition-all duration-300 ${activeTab === tab.id ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-200' : 'text-slate-400 hover:text-indigo-600'}`}>
-                  {tab.icon} {tab.label}
-                </button>
-              ))}
-              <button onClick={resetAll} className="flex items-center gap-3 px-6 py-3 rounded-2xl text-[10px] text-red-500 hover:bg-red-50 transition-all font-black">
-                <RefreshCw size={16} /> Reset
+
+            <nav className="flex p-1.5 bg-white rounded-[2rem] shadow-sm border border-white w-fit gap-1">
+              <button onClick={() => setActiveTab('simulator')} className={`flex items-center gap-3 px-6 py-3 rounded-2xl text-[10px] transition-all ${activeTab === 'simulator' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400'}`}>
+                <LayoutDashboard className="w-4 h-4" /> Simulateur
+              </button>
+              <button onClick={() => setActiveTab('roadmap')} className={`flex items-center gap-3 px-6 py-3 rounded-2xl text-[10px] transition-all ${activeTab === 'roadmap' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400'}`}>
+                <Target className="w-4 h-4" /> Roadmap
+              </button>
+              <button onClick={resetAll} className="flex items-center gap-3 px-6 py-3 rounded-2xl text-[10px] text-red-500 font-black hover:bg-red-50">
+                <RefreshCw className="w-4 h-4" /> Reset
               </button>
             </nav>
           </div>
 
-          <div className="relative group min-w-[320px] md:min-w-[400px]">
+          <div className="relative min-w-[320px] md:min-w-[420px]">
             <div className="absolute inset-0 bg-gradient-to-br from-indigo-500 to-emerald-500 blur-[60px] opacity-20 scale-110"></div>
-            <div className="relative bg-slate-950 p-8 rounded-[4rem] shadow-2xl border border-slate-800 text-center overflow-hidden">
-              <p className="text-[10px] text-indigo-400 tracking-[0.5em] mb-4 opacity-70 italic font-black">Net Global Estimé</p>
-              <p className="text-5xl md:text-6xl text-white tracking-tighter italic font-black">{formatEuro(results.totalGains)}</p>
-              <div className="mt-6 flex items-center justify-center gap-3 bg-white/5 border border-white/10 py-2 px-6 rounded-full mx-auto w-fit font-black italic">
-                <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                <span className="text-[9px] text-white/70 tracking-widest uppercase italic font-black">Calcul Temps Réel</span>
-              </div>
+            <div className="relative bg-slate-950 p-8 rounded-[3.5rem] shadow-2xl border border-slate-800 text-center">
+              <p className="text-[9px] text-indigo-400 tracking-[0.6em] mb-4 opacity-70 italic font-black uppercase">Net Mensuel Global Estimé</p>
+              <p className="text-6xl md:text-7xl text-white tracking-tighter tabular-nums font-black font-black">
+                {stats.grandTotal.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+              </p>
             </div>
           </div>
         </header>
 
-        {/* CONTENU - SIMULATEUR */}
         {activeTab === 'simulator' && (
-          <div className="grid grid-cols-1 xl:grid-cols-3 gap-10 animate-in fade-in">
-            <div className="xl:col-span-2 space-y-10">
+          <div className="grid grid-cols-1 xl:grid-cols-12 gap-10 animate-in fade-in duration-500">
+            
+            {/* INPUTS PRINCIPAUX */}
+            <div className="xl:col-span-8 space-y-10">
               
-              {/* VENTES NIVEAU 1 */}
               <div className="bg-white rounded-[3.5rem] shadow-sm border border-white overflow-hidden">
-                <div className="p-8 md:p-10 border-b border-slate-50 flex items-center justify-between bg-slate-50/30">
-                  <h2 className="text-slate-800 text-[11px] tracking-[0.3em] flex items-center gap-4 underline decoration-indigo-300 underline-offset-8 font-black">
-                    <Package className="w-5 h-5 text-indigo-600" /> Inventaire Niveau 1
+                <div className="p-8 border-b border-slate-50 flex items-center justify-between bg-slate-50/50">
+                  <h2 className="text-[11px] tracking-[0.3em] flex items-center gap-4 font-black italic">
+                    <Package className="w-5 h-5 text-indigo-600" /> 1. Ligne Directe (L1)
                   </h2>
-                  <div className="bg-slate-900 text-white px-6 py-2 rounded-xl text-[10px] tracking-widest shadow-lg italic font-black">{Math.round(results.directSV)} SV</div>
+                  <div className="bg-indigo-600 text-white px-5 py-2 rounded-xl text-[10px] shadow-lg italic font-black">{stats.l1Sv.toFixed(0)} SV</div>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-[11px] tracking-widest min-w-[500px]">
-                    <thead className="bg-slate-50/80 text-slate-400 font-black uppercase">
+                    <thead className="bg-slate-50 text-slate-400 font-black italic">
                       <tr>
-                        <th className="px-10 py-8">Désignation</th>
-                        <th className="px-6 py-8 text-center">SV</th>
-                        <th className="px-6 py-8 text-center w-32">Qté</th>
-                        <th className="px-10 py-8 text-right">Marge HT</th>
+                        <th className="px-10 py-6 uppercase">Produit</th>
+                        <th className="px-6 py-6 text-center uppercase">SV</th>
+                        <th className="px-6 py-6 text-center w-32 uppercase">Qté</th>
+                        <th className="px-10 py-6 text-right uppercase">Marge</th>
                       </tr>
                     </thead>
-                    <tbody>
+                    <tbody className="divide-y divide-slate-50 font-black italic uppercase">
                       {PRODUCTS.map(p => (
-                        <tr key={p.id} className="hover:bg-indigo-50/10 transition-all group duration-300 font-black italic">
-                          <td className="px-8 md:px-10 py-8">
-                            <p className="text-slate-950 text-base mb-1 font-black group-hover:text-indigo-700">{p.name}</p>
-                            <p className="text-[9px] text-slate-400 italic">BA HT: {formatEuro(p.baHT)}</p>
-                          </td>
-                          <td className="px-6 py-8 text-center text-indigo-600 font-black italic">{p.sv}</td>
-                          <td className="px-6 py-8 text-center">
+                        <tr key={p.id} className="hover:bg-indigo-50/10 transition-all">
+                          <td className="px-10 py-6 text-slate-900">{p.name}</td>
+                          <td className="px-6 py-6 text-center text-indigo-600">{p.sv}</td>
+                          <td className="px-6 py-6 text-center">
                             <input 
-                              type="text" 
-                              value={quantities[p.id]} 
-                              onChange={(e) => setQuantities({...quantities, [p.id]: e.target.value})}
-                              className="w-20 md:w-24 bg-slate-100/50 border-2 border-transparent rounded-[1.5rem] px-4 py-3 text-center font-black text-lg focus:bg-white focus:border-indigo-600 outline-none shadow-inner" 
+                              type="number" value={quantities[p.id] || ""} 
+                              onChange={(e) => setQuantities({...quantities, [p.id]: parseInt(e.target.value) || 0})}
+                              className="w-20 bg-slate-100 rounded-xl px-3 py-2 text-center font-black focus:bg-white outline-none" 
                               placeholder="0"
                             />
                           </td>
-                          <td className="px-8 md:px-10 py-8 text-right text-emerald-600 text-lg font-black italic">
-                            {formatEuro((p.clientHT - p.baHT) * (parseFloat(quantities[p.id]) || 0))}
+                          <td className="px-10 py-6 text-right text-emerald-600">
+                            {((p.clientHT - p.baHT) * (quantities[p.id] || 0)).toFixed(2)} €
                           </td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
-                <div className="bg-indigo-50/50 p-10 flex justify-between items-center border-t border-indigo-100 font-black italic">
-                  <span className="text-indigo-900/40 text-[10px] tracking-widest uppercase">Total Marges Directes</span>
-                  <span className="text-indigo-600 text-3xl md:text-4xl tracking-tighter font-black italic">{formatEuro(results.totalMargin)}</span>
-                </div>
               </div>
 
-              {/* PERFORMANCE RÉSEAU */}
-              <div className="bg-slate-950 rounded-[3.5rem] p-8 md:p-14 shadow-2xl border border-slate-800 text-white relative overflow-hidden group">
-                <div className="relative z-10 space-y-12">
-                  <div className="flex flex-col md:flex-row items-center justify-between border-b border-white/5 pb-8 gap-4">
-                    <h2 className="uppercase text-[10px] tracking-[0.4em] text-indigo-400 flex items-center gap-5">
-                      <Layers className="w-5 h-5" /> Performance Réseau
-                    </h2>
-                    <div className="bg-indigo-600/20 text-indigo-400 px-6 py-2 rounded-full text-[9px] tracking-widest border border-indigo-600/30 font-black italic">
-                      CUMUL N1+N2 : {Math.round(results.totalVolumeDirect)} SV
-                    </div>
+              <div className="bg-slate-950 rounded-[3.5rem] p-10 md:p-14 shadow-2xl border border-slate-800 text-white space-y-12">
+                <div className="space-y-6">
+                  <div className="flex justify-between items-center font-black italic">
+                    <h2 className="text-[11px] tracking-[0.4em] text-indigo-400 flex items-center gap-4"><Users className="w-5 h-5" /> 2. Ligne Partenaires (L2)</h2>
+                    <span className="text-3xl text-white font-black">{n2Sv.toFixed(0)} SV</span>
                   </div>
-                  
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-10 italic font-black">
-                    <div className="space-y-6">
-                      <label className="text-[10px] text-slate-500 tracking-widest ml-4">Niveau 2 (Affiliés)</label>
-                      <input type="text" value={n2SV} onChange={(e) => setN2SV(e.target.value)} className="w-full bg-white/5 border-2 border-white/10 rounded-[2rem] px-6 py-8 text-4xl outline-none transition-all text-white text-center focus:border-purple-500 focus:bg-white/10" placeholder="0" />
+                  <input type="range" min="0" max="10000" step="100" value={n2Sv} onChange={(e) => setN2Sv(parseInt(e.target.value))} className="slider-prysm" />
+                </div>
+
+                <div className="space-y-6 pt-6 border-t border-white/5">
+                  <div className="flex justify-between items-center font-black italic">
+                    <div className="flex items-center gap-4">
+                       <h2 className="text-[11px] tracking-[0.4em] text-indigo-400 uppercase">3. Volume Groupe (GSV)</h2>
+                       {stats.l1Sv < L2_UNLOCK_THRESHOLD ? <div className="bg-red-500/20 text-red-500 px-3 py-1 rounded-full text-[8px] font-black italic uppercase"><Lock size={10}/> 500 L1 REQUIS</div> : <div className="bg-emerald-500/20 text-emerald-500 px-3 py-1 rounded-full text-[8px] font-black italic uppercase"><Unlock size={10}/> ACTIF</div>}
                     </div>
-                    <div className="space-y-6 relative">
-                      <div className="flex items-center justify-between ml-4">
-                        <label className="text-[10px] text-slate-500 tracking-widest">Volume Groupe</label>
-                        {results.isGroupUnlocked ? <Unlock size={12} className="text-emerald-500" /> : <Lock size={12} className="text-red-500" />}
-                      </div>
-                      <div className="relative">
-                        <input type="text" value={groupSV} onChange={(e) => setGroupSV(e.target.value)} disabled={!results.isGroupUnlocked} className={`w-full bg-white/5 border-2 rounded-[2rem] px-6 py-8 text-4xl outline-none transition-all text-white text-center ${!results.isGroupUnlocked ? 'opacity-20' : 'border-indigo-600 shadow-lg shadow-indigo-900/20'}`} placeholder="0" />
-                        {!results.isGroupUnlocked && (
-                          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                            <span className="bg-red-600/90 text-white text-[8px] px-3 py-1 rounded-full font-black">2k Direct requis</span>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                    <div className="space-y-6 relative">
-                      <div className="flex items-center justify-between ml-4">
-                        <label className="text-[10px] text-slate-500 tracking-widest">Volume Équipe</label>
-                        {results.canLead ? <Unlock size={12} className="text-emerald-500" /> : <Lock size={12} className="text-red-500" />}
-                      </div>
-                      <div className="relative">
-                        <input type="text" value={orgSV} onChange={(e) => setOrgSV(e.target.value)} disabled={!results.canLead} className={`w-full bg-white/5 border-2 rounded-[2rem] px-6 py-8 text-4xl outline-none transition-all text-white text-center ${!results.canLead ? 'opacity-20' : 'border-indigo-600 shadow-lg shadow-indigo-900/20'}`} placeholder="0" />
-                        {!results.canLead && (
-                          <div className="absolute inset-0 flex items-center justify-center pointer-events-none text-center">
-                            <span className="bg-red-600/90 text-white text-[8px] px-3 py-1 rounded-full font-black">3k Groupe requis</span>
-                          </div>
-                        )}
-                      </div>
-                    </div>
+                    <span className="text-3xl text-white font-black">{stats.totalGsv.toFixed(0)} SV</span>
                   </div>
+                  <input type="range" min="0" max="25000" step="250" value={buildGsv} onChange={(e) => setBuildGsv(parseInt(e.target.value))} className="slider-prysm accent-indigo-500" />
+                </div>
+
+                <div className={`space-y-6 pt-6 border-t border-white/5 transition-opacity ${!stats.isLeadQualified ? 'opacity-30' : 'opacity-100'}`}>
+                  <div className="flex justify-between items-center font-black italic">
+                    <div className="flex items-center gap-4">
+                       <h2 className="text-[11px] tracking-[0.4em] text-indigo-400 uppercase">4. Volume G1 BR (10%)</h2>
+                       {!stats.isLeadQualified ? <div className="bg-red-500/20 text-red-500 px-3 py-1 rounded-full text-[8px] font-black italic uppercase"><Lock size={10}/> 3000 GSV REQUIS</div> : <div className="bg-emerald-500/20 text-emerald-500 px-3 py-1 rounded-full text-[8px] font-black italic uppercase"><Unlock size={10}/> DÉBLOQUÉ</div>}
+                    </div>
+                    <span className="text-3xl text-white font-black">{g1Sv.toFixed(0)} SV</span>
+                  </div>
+                  <input 
+                    type="range" min="0" max="100000" step="500" value={g1Sv} 
+                    disabled={!stats.isLeadQualified}
+                    onChange={(e) => setG1Sv(parseInt(e.target.value))} 
+                    className="slider-prysm" 
+                  />
+                </div>
+
+                <div className={`space-y-6 pt-6 border-t border-white/5 transition-opacity ${!stats.isLeadQualified ? 'opacity-30' : 'opacity-100'}`}>
+                  <div className="flex justify-between items-center font-black italic">
+                    <h2 className="text-[11px] tracking-[0.4em] text-indigo-400 uppercase">5. Volume Profondeur (5%)</h2>
+                    <span className="text-3xl text-white font-black">{teamSv.toFixed(0)} SV</span>
+                  </div>
+                  <input 
+                    type="range" min="0" max="500000" step="1000" value={teamSv} 
+                    disabled={!stats.isLeadQualified}
+                    onChange={(e) => setTeamSv(parseInt(e.target.value))} 
+                    className="slider-prysm" 
+                  />
                 </div>
               </div>
             </div>
 
-            {/* SIDEBAR */}
-            <div className="space-y-10 italic font-black">
-              <div className="bg-white rounded-[3.5rem] p-10 shadow-2xl border border-white sticky top-8">
-                <h2 className="text-xl mb-12 flex items-center gap-4 border-b border-slate-100 pb-10 tracking-[0.1em] text-slate-950 underline decoration-indigo-200 decoration-[4px] underline-offset-[12px]">
-                  <Star className="w-8 h-8 text-indigo-600" /> Récapitulatif
-                </h2>
-                
-                <div className="space-y-8">
+            {/* RÉCAPITULATIF DROITE */}
+            <div className="xl:col-span-4 space-y-10 font-black italic uppercase">
+              <div className="bg-white rounded-[3.5rem] p-10 shadow-2xl border border-white sticky top-8 italic uppercase font-black">
+                <h2 className="text-xl mb-12 flex items-center gap-4 border-b border-slate-100 pb-10 tracking-[0.1em] text-slate-950 underline decoration-indigo-200 decoration-[4px] underline-offset-[12px] font-black italic"><Star className="w-8 h-8 text-indigo-600" /> Détail Gains</h2>
+                <div className="space-y-10">
                   <div className="space-y-4">
-                    <span className="text-[9px] text-slate-400 tracking-[0.3em] font-black uppercase">Bénéfice Ventes</span>
-                    <div className="flex justify-between items-center px-4 py-3 bg-indigo-50/50 rounded-2xl border border-indigo-100 italic">
-                      <span className="text-[10px]">Marges Directes</span>
-                      <span className="text-xl text-indigo-600 font-black">{formatEuro(results.totalMargin)}</span>
-                    </div>
+                    <span className="text-[9px] text-slate-400 tracking-[0.3em] uppercase italic">Profit Commercial</span>
+                    <div className="flex justify-between items-center px-4 py-4 bg-indigo-50/50 rounded-2xl border border-indigo-100 font-black italic uppercase"><span className="text-[10px]">Marges Ventes</span><span className="text-2xl text-indigo-600 font-black">{stats.totalMargin.toFixed(2)} €</span></div>
                   </div>
 
-                  <div className="space-y-4 border-t border-slate-50 pt-8">
-                    <span className="text-[9px] text-slate-400 tracking-[0.3em] font-black uppercase">Commissions Points</span>
-                    <div className="space-y-6 text-[10px] tracking-[0.1em]">
-                      <div className="flex justify-between items-center">
-                        <div className="flex flex-col gap-1">
-                          <span className="text-slate-400">Selling Bonus</span>
-                          <span className="text-[8px] bg-slate-100 px-2 py-0.5 rounded text-slate-600 font-black">{results.sellRate * 100}%</span>
-                        </div>
-                        <span className="text-base text-slate-950 font-black">{formatEuro(results.sellingBonus)}</span>
-                      </div>
-                      <div className={`flex justify-between items-center ${results.refRate === 0 ? 'opacity-20 grayscale' : ''}`}>
-                        <div className="flex flex-col gap-1">
-                          <span className="text-slate-400">Referring Bonus</span>
-                          <span className="text-[8px] bg-slate-100 px-2 py-0.5 rounded text-slate-600 font-black">{results.refRate > 0 ? (results.refRate * 100) + '%' : 'Off'}</span>
-                        </div>
-                        <span className="text-base text-slate-950 font-black">{formatEuro(results.referringBonus)}</span>
-                      </div>
-                      <div className={`flex justify-between items-center ${results.buildingBonus === 0 ? 'opacity-20 grayscale' : ''}`}>
-                        <div className="flex flex-col gap-1">
-                          <span className="text-slate-400">Groupe Bonus</span>
-                          <span className="text-[8px] bg-slate-100 px-2 py-0.5 rounded text-slate-600 font-black">{results.buildingRate > 0 ? (results.buildingRate * 100) + '%' : 'Bloqué'}</span>
-                        </div>
-                        <span className="text-base text-slate-950 font-black">{formatEuro(results.buildingBonus)}</span>
-                      </div>
-                      <div className={`flex justify-between items-center ${results.leadingBonus === 0 ? 'opacity-20 grayscale' : ''}`}>
-                        <div className="flex flex-col gap-1">
-                          <span className="text-slate-400">Équipe Bonus</span>
-                          <span className="text-[8px] bg-slate-100 px-2 py-0.5 rounded text-slate-600 font-black">{results.canLead ? 'Lead 5%' : 'Bloqué'}</span>
-                        </div>
-                        <span className="text-base text-slate-950 font-black">{formatEuro(results.leadingBonus)}</span>
-                      </div>
-                    </div>
+                  <div className="space-y-6 pt-8 border-t border-slate-100 font-black italic uppercase">
+                    <span className="text-[9px] text-slate-400 tracking-[0.3em] uppercase">Commissions Points</span>
+                    <div className="flex justify-between items-center font-black"><p className="text-xs">Bonus L1 (5%)</p><span className="text-xl text-slate-950 font-black">{stats.bonusL1.toFixed(2)} €</span></div>
+                    <div className={`flex justify-between items-center transition-all ${stats.isL2Unlocked ? 'opacity-100' : 'opacity-20 grayscale'}`}><p className="text-xs">Bonus L2 (5%)</p><span className="text-xl text-slate-950 font-black">{stats.bonusL2.toFixed(2)} €</span></div>
+                    <div className={`flex justify-between items-center transition-all ${stats.buildRate > 0 ? 'opacity-100' : 'opacity-20 grayscale'}`}><p className="text-xs">Build ({stats.buildRate}%)</p><span className="text-xl text-indigo-600 font-black">{stats.bonusBuild.toFixed(2)} €</span></div>
+                    <div className={`flex justify-between items-center transition-all ${stats.isLeadQualified ? 'opacity-100' : 'opacity-20 grayscale'}`}><p className="text-xs">Lead G1 (10%)</p><span className="text-xl text-blue-600 font-black">{stats.bonusLead10.toFixed(2)} €</span></div>
+                    <div className={`flex justify-between items-center transition-all ${stats.isLeadQualified ? 'opacity-100' : 'opacity-20 grayscale'}`}><p className="text-xs">Lead G1-G6 (5%)</p><span className="text-xl text-emerald-600 font-black">{stats.bonusLead05.toFixed(2)} €</span></div>
                   </div>
                 </div>
-
-                <div className="pt-16 border-t-4 border-slate-50 text-center">
-                  <p className="text-slate-400 text-[11px] uppercase tracking-[0.4em] mb-10 opacity-40 italic font-black">Versement Net Total</p>
-                  <div className="bg-slate-950 p-10 rounded-[3rem] shadow-xl border-4 border-indigo-600/30">
-                    <p className="text-5xl text-white tracking-tighter font-black italic">{formatEuro(results.totalGains)}</p>
-                  </div>
-                </div>
+                <div className="mt-16 pt-10 border-t-4 border-slate-50"><div className="p-6 rounded-3xl bg-slate-50 border border-slate-100 flex items-center gap-3"><ShieldCheck className="text-emerald-500 w-5 h-5" /><span className="text-[9px] font-black uppercase text-slate-400 italic">Protection Subaru Active</span></div></div>
               </div>
             </div>
           </div>
         )}
 
-        {/* CONTENU - ROADMAP */}
         {activeTab === 'roadmap' && (
-          <div className="animate-in fade-in italic uppercase font-black">
-            <div className="bg-white rounded-[4rem] shadow-2xl border border-white p-10 md:p-16 space-y-16">
-              <div className="flex flex-col md:flex-row md:items-center justify-between border-b border-slate-100 pb-12 gap-8">
-                <div>
-                  <h2 className="text-4xl md:text-5xl tracking-tighter mb-4 italic">Roadmap Points SV</h2>
-                  <p className="text-base text-slate-400 tracking-widest border-l-8 border-indigo-500 pl-6 font-black">Synthèse Performance Globale</p>
-                </div>
-                <div className="p-10 bg-slate-950 rounded-[3rem] text-center min-w-[300px] border-b-8 border-indigo-600">
-                  <p className="text-[10px] text-indigo-400 tracking-[0.5em] mb-2 opacity-70">Volume Cumulé (G+E)</p>
-                  <p className="text-5xl text-white tracking-tighter font-black">{Math.round(results.group + results.org)} SV</p>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 gap-12">
-                {/* GROUPE PROGRESS */}
-                <div className="bg-slate-50/50 p-10 md:p-12 rounded-[3rem] border border-slate-100 hover:bg-white hover:shadow-xl transition-all group">
-                  <div className="flex flex-col lg:flex-row lg:items-center justify-between mb-8 gap-6">
-                    <h3 className="text-2xl md:text-3xl tracking-tight">
-                      <span className="underline decoration-indigo-200 decoration-4 underline-offset-8">Groupe</span>
-                      <span className="text-lg opacity-30 ml-2 font-black">: Objectif 3k SV</span>
-                    </h3>
-                    <div className="text-right flex items-center justify-end font-black italic">
-                      <span className="text-5xl md:text-6xl text-indigo-600 tracking-tighter">{Math.round(results.group)}</span>
-                      <span className="text-slate-300 mx-4 text-2xl">/</span>
-                      <span className="text-xl text-slate-400 tracking-widest">3 000 SV</span>
-                    </div>
+          <div className="bg-white rounded-[4rem] p-10 md:p-16 animate-in fade-in duration-500 space-y-16 shadow-xl border border-white font-black italic uppercase">
+            <div className="flex flex-col md:flex-row items-center justify-between border-b border-slate-100 pb-12 gap-8">
+               <div>
+                  <h2 className="text-4xl italic tracking-tighter">Objectifs SV</h2>
+                  <p className="text-slate-400 text-sm tracking-widest mt-2 border-l-4 border-indigo-600 pl-4">Synthèse Performance Globale</p>
+               </div>
+               <div className="bg-slate-950 p-10 rounded-[3rem] text-center min-w-[300px]">
+                  <p className="text-indigo-400 text-[10px] tracking-[0.5em] mb-2">Volume Global Cumulé</p>
+                  <p className="text-5xl text-white font-black">{(stats.totalGsv + stats.g1Sv + stats.teamSv).toFixed(0)} SV</p>
+               </div>
+            </div>
+            <div className="grid grid-cols-1 gap-12">
+               <div className="space-y-6">
+                  <div className="flex justify-between items-end italic"><h3 className="text-xl">Statut Qualification Lead</h3><p className="text-2xl text-indigo-600 font-black">{stats.totalGsv.toFixed(0)} / {LEAD_THRESHOLD} SV</p></div>
+                  <div className="h-10 w-full bg-slate-100 rounded-full border-4 border-white shadow-inner p-1.5 overflow-hidden">
+                    <div className="h-full bg-gradient-to-r from-orange-400 to-indigo-600 rounded-full transition-all duration-1000" style={{ width: `${Math.min((stats.totalGsv / LEAD_THRESHOLD) * 100, 100)}%` }}></div>
                   </div>
-                  <div className="relative h-10 w-full bg-slate-200 rounded-[2rem] overflow-hidden shadow-inner p-1.5 border-4 border-white">
-                    <div className="h-full bg-gradient-to-r from-orange-400 to-orange-600 rounded-[1.5rem] transition-all duration-[2000ms]" style={{ width: `${Math.min((results.group / 3000) * 100, 100)}%` }}></div>
-                  </div>
-                </div>
-
-                {/* EQUIPE PROGRESS */}
-                <div className="bg-slate-50/50 p-10 md:p-16 rounded-[4rem] border border-slate-100 hover:bg-white hover:shadow-xl transition-all group">
-                  <div className="flex flex-col lg:flex-row lg:items-center justify-between mb-8 gap-6 font-black uppercase italic">
-                    <h3 className="text-2xl md:text-3xl tracking-tight no-wrap font-black uppercase">
-                      <span className="underline decoration-indigo-200 decoration-4 underline-offset-8">Équipe</span>
-                      <span className="text-lg opacity-30 ml-2 italic font-black">: Objectif 10k SV</span>
-                    </h3>
-                    <div className="text-right no-wrap flex items-center justify-end font-black italic uppercase">
-                      <span className="text-5xl md:text-7xl text-indigo-600 tracking-tighter font-black italic">{Math.round(results.org)}</span>
-                      <span className="text-slate-300 mx-4 text-2xl font-black italic">/</span>
-                      <span className="text-xl md:text-2xl text-slate-400 tracking-widest italic font-black uppercase">10 000 SV</span>
-                    </div>
-                  </div>
-                  <div className="relative h-10 w-full bg-slate-200 rounded-[2rem] overflow-hidden shadow-inner p-1.5 border-4 border-white">
-                    <div className="h-full bg-gradient-to-r from-indigo-600 to-blue-700 rounded-[1.5rem] transition-all duration-[2500ms]" style={{ width: `${Math.min((results.org / 10000) * 100, 100)}%` }}></div>
-                  </div>
-                </div>
-              </div>
+               </div>
             </div>
           </div>
         )}
-
-        {/* CONTENU - IMPACT */}
-        {activeTab === 'impact' && (
-          <div className="animate-in fade-in uppercase font-black italic">
-            <div className="bg-white rounded-[4rem] shadow-2xl border border-white p-8 md:p-16 space-y-16">
-              <div className="flex items-center gap-6 md:gap-10 border-b border-slate-100 pb-12">
-                <div className="h-20 w-20 bg-red-50 text-red-600 rounded-[2rem] flex items-center justify-center shadow-inner">
-                  <AlertTriangle className="w-10 h-10" />
-                </div>
-                <div>
-                  <h2 className="text-3xl md:text-5xl tracking-tighter mb-2 italic">Levier Déblocage</h2>
-                  <p className="text-sm md:text-lg text-slate-400 tracking-widest border-l-8 border-red-500 pl-6">Seuil 3 000 SV = Profits Maximisés</p>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-16 font-black">
-                <div className="space-y-12">
-                  <div className="bg-slate-50/80 p-8 md:p-10 rounded-[3rem] border border-slate-100 shadow-inner">
-                    <div className="flex justify-between items-center mb-10">
-                      <h3 className="text-lg font-black tracking-widest text-slate-800">Volume Groupe (GSV)</h3>
-                      <div className={`px-6 py-3 rounded-2xl text-2xl md:text-3xl font-black italic shadow-lg text-white ${results.canLead ? 'bg-emerald-500' : (results.buildingRate > 0 ? 'bg-orange-500' : 'bg-red-500')}`}>
-                        {Math.round(results.group)} SV
-                      </div>
-                    </div>
-                    <div className="relative pt-8 pb-6 px-2 italic">
-                      <input type="range" min="0" max="5000" step="50" value={results.group} onChange={(e) => setGroupSV(e.target.value)} className="w-full h-8 bg-slate-200 rounded-full appearance-none cursor-pointer accent-red-600" />
-                      <div className="absolute top-0 left-0 w-full flex justify-between text-[9px] tracking-[0.2em] text-slate-400 italic">
-                        <span>Base</span>
-                        <span className="text-indigo-600 underline decoration-indigo-200 font-black">CIBLE : 3 000 SV</span>
-                        <span>Elite</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="bg-slate-950 rounded-[3rem] p-8 md:p-10 text-white shadow-2xl relative overflow-hidden group">
-                    <div className="flex items-center gap-4 mb-10 text-indigo-400 tracking-widest italic">
-                      <Users className="w-6 h-6" />
-                      <h4 className="text-xl md:text-2xl font-black">Volume Équipe (Org)</h4>
-                    </div>
-                    <div className="relative flex items-center justify-center min-h-[120px]">
-                      <input type="text" value={orgSV} onChange={(e) => setOrgSV(e.target.value)} className="bg-white/5 border-2 border-white/10 rounded-[2rem] px-4 py-8 text-4xl md:text-5xl text-center text-white italic outline-none focus:border-indigo-500 transition-all w-full tracking-tighter" placeholder="0" />
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex flex-col gap-10">
-                  {!results.canLead ? (
-                    <div className="flex-1 bg-red-50 border-4 border-red-100 rounded-[3rem] p-10 flex flex-col items-center justify-center text-center animate-pulse shadow-xl">
-                      <TrendingUp className="w-12 h-12 text-red-500 mb-6 rotate-180" />
-                      <h4 className="text-lg md:text-xl font-black mb-4 italic">Perte Potentielle</h4>
-                      <p className="text-red-950 text-6xl md:text-7xl font-black tracking-tighter mb-10 drop-shadow-md leading-none italic">
-                        -{formatEuro((results.org * TEAM_YIELD_PER_SV) + (results.group * (GROUP_YIELD_10_PER_SV - GROUP_YIELD_5_PER_SV)))}
-                      </p>
-                      <p className="mt-10 text-[9px] text-red-500 tracking-[0.3em] font-black underline italic no-wrap">IL MANQUE {Math.max(0, 3000 - results.group)} SV DANS LE GROUPE</p>
-                    </div>
-                  ) : (
-                    <div className="flex-1 bg-emerald-50 border-4 border-emerald-100 rounded-[3rem] p-10 flex flex-col items-center justify-center text-center shadow-xl transform scale-105">
-                      <CheckCircle2 className="w-12 h-12 text-emerald-500 mb-6 animate-bounce" />
-                      <h4 className="text-lg md:text-xl font-black mb-4 italic">Gain Actif</h4>
-                      <p className="text-emerald-950 text-6xl md:text-7xl font-black tracking-tighter mb-10 drop-shadow-md leading-none italic">
-                        +{formatEuro(results.buildingBonus + results.leadingBonus)}
-                      </p>
-                      <div className="bg-emerald-500 text-white px-8 py-3 rounded-[2rem] text-[12px] tracking-[0.4em] shadow-lg italic font-black">
-                        3 000 SV ATTEINTS
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* FOOTER ENGINE INFO */}
-        <footer className="mt-16 pb-12 border-t border-slate-200 pt-16 flex flex-col md:flex-row justify-between items-center gap-10 text-[11px] font-black uppercase text-slate-400 tracking-[0.5em] italic">
-            <div className="flex items-center gap-6 font-black italic">
-                <div className="h-3 w-3 rounded-full bg-emerald-500 shadow-[0_0_15px_#10b981] animate-pulse"></div>
-                <span>PRYSM io Platinum Engine v4.7</span>
-            </div>
-            <span className="opacity-30">Strategic Intelligence © Strategy Partners</span>
-        </footer>
       </div>
+
+      <style>{`
+        .slider-prysm { -webkit-appearance: none; width: 100%; height: 12px; background: #1e293b; border-radius: 10px; outline: none; border: 1px solid rgba(255,255,255,0.05); }
+        .slider-prysm::-webkit-slider-thumb { -webkit-appearance: none; height: 32px; width: 32px; border-radius: 50%; background: #ffffff; border: 6px solid #4f46e5; box-shadow: 0 0 20px rgba(79, 70, 229, 0.4); cursor: pointer; transition: transform 0.2s ease; }
+        .slider-prysm:active::-webkit-slider-thumb { transform: scale(1.15); }
+        .slider-prysm:disabled { opacity: 0.15; cursor: not-allowed; }
+        input[type=number]::-webkit-inner-spin-button, input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+        input[type=number] { -moz-appearance: textfield; }
+      `}</style>
     </div>
   );
 }

@@ -2,24 +2,70 @@
 @tailwind components;
 @tailwind utilities;
 
+/**
+ * FICHIER : app/globals.css
+ * Identité visuelle Business NSK : Extra-gras (900), Italique et Majuscules.
+ */
+
 :root {
-  --foreground-rgb: 30, 41, 59;
-  --background-start-rgb: 248, 250, 252;
-  --background-end-rgb: 255, 255, 255;
+  --foreground-rgb: 15, 23, 42; /* slate-900 */
+  --background-rgb: 248, 250, 252; /* slate-50 */
 }
 
 body {
   color: rgb(var(--foreground-rgb));
-  background: linear-gradient(
-      to bottom,
-      transparent,
-      rgb(var(--background-end-rgb))
-    )
-    rgb(var(--background-start-rgb));
-  min-height: 100vh;
+  background: rgb(var(--background-rgb));
+  margin: 0;
+  padding: 0;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-/* Style global pour garder l'aspect italique que tu aimes */
-.italic-all {
-  font-style: italic;
+/* --- CLASSES D'IDENTITÉ MASTER --- */
+
+.font-black { 
+  font-weight: 900 !important; 
+}
+
+.italic { 
+  font-style: italic !important; 
+}
+
+.uppercase { 
+  text-transform: uppercase !important; 
+}
+
+/* --- COMPOSANTS ET ÉLÉMENTS --- */
+
+/* Personnalisation de la barre de défilement (Scrollbar) */
+::-webkit-scrollbar { 
+  width: 6px; 
+}
+
+::-webkit-scrollbar-track { 
+  background: #f1f5f9; 
+}
+
+::-webkit-scrollbar-thumb { 
+  background: #0f172a; 
+  border-radius: 10px; 
+}
+
+::-webkit-scrollbar-thumb:hover { 
+  background: #2563eb; 
+}
+
+/* Utilitaires pour le design "Bulle" */
+.rounded-bubble {
+  border-radius: 4.5rem !important;
+}
+
+/* Animations de transition fluides */
+.animate-fade-in {
+  animation: fadeIn 0.5s ease-out forwards;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }

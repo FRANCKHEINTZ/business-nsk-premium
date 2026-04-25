@@ -1,47 +1,51 @@
-export default function RootLayout({ children }) {
-  return (
-    <div className="antialiased italic bg-slate-50 text-slate-900 min-h-screen">
-      {/* Chargement de Tailwind et des Polices via CDN pour l'aperçu */}
-      <link 
-        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" 
-        rel="stylesheet" 
-      />
-      <script src="https://cdn.tailwindcss.com"></script>
-      
-      <style>
-        {`
-          /* Simulation des styles de globals.css */
-          :root {
-            --foreground-rgb: 30, 41, 59;
-            --background-start-rgb: 248, 250, 252;
-            --background-end-rgb: 255, 255, 255;
-          }
-          
-          body, .font-inter {
-            font-family: 'Inter', sans-serif;
-          }
+import React from 'react';
 
-          .italic {
-            font-style: italic;
-          }
+/**
+ * FICHIER : app/layout.js
+ * REMPLACEZ TOUT LE CONTENU DE VOTRE FICHIER PAR CE CODE.
+ * Ce fichier force le design "Bulle Premium" et la police Inter 900.
+ */
 
-          /* Reset de base pour l'aperçu */
-          main {
-            min-height: 100vh;
-          }
-        `}
-      </style>
-
-      {/* Structure du site */}
-      <main className="font-inter">
-        {children}
-      </main>
-    </div>
-  );
+export const metadata = {
+  title: 'BUSINESS NSK | Master Premium',
+  description: 'Portail stratégique Invest In Your Future',
 }
 
-// Métadonnées (utilisées par Next.js en production)
-export const metadata = {
-  title: 'Business NSK - Portail Stratégique',
-  description: 'Plateforme de pilotage premium pour leaders Nu Skin',
-};
+export default function RootLayout({ children }) {
+  return (
+    <html lang="fr" suppressHydrationWarning>
+      <head>
+        {/* Chargement forcé de Tailwind CSS via CDN pour garantir le visuel sur votre Mac */}
+        <script src="https://cdn.tailwindcss.com"></script>
+        
+        {/* Configuration des polices et styles globaux Business NSK */}
+        <style dangerouslySetInnerHTML={{ __html: `
+          @import url('https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,900;1,900&display=swap');
+          
+          body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Inter', sans-serif !important;
+            background-color: #f8fafc !important;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+          }
+
+          /* Classes d'identité visuelle Master */
+          .font-black { font-weight: 900 !important; }
+          .italic { font-style: italic !important; }
+          .uppercase { text-transform: uppercase !important; }
+
+          /* Masquage de la scrollbar pour un look épuré */
+          ::-webkit-scrollbar {
+            width: 0px;
+            background: transparent;
+          }
+        `}} />
+      </head>
+      <body className="antialiased font-black italic uppercase">
+        {children}
+      </body>
+    </html>
+  );
+}

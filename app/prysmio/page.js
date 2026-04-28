@@ -29,12 +29,20 @@ const PRODUCTS = [
   { id: 7, name: "Pack Essentiel (ADR)", clientHT: 211.81, baHT: 162.84, sv: 126.70 },
 ];
 
-// INITIALISATION FIREBASE CONFIG
-const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+// INITIALISATION FIREBASE CONFIG (Remplacer par vos vraies clés)
+const firebaseConfig = {
+  apiKey: "TON_API_KEY_ICI",
+  authDomain: "ton-projet.firebaseapp.com",
+  projectId: "ton-projet",
+  storageBucket: "ton-projet.appspot.com",
+  messagingSenderId: "123456789",
+  appId: "1:123456789:web:abcdef"
+};
+
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'prysm-2026-master';
+const appId = 'prysm-2026-master'; // Garde ce nom ou change-le selon ton projet
 
 export default function PrysmioPage() {
   const [activeTab, setActiveTab] = useState('simulator');
@@ -45,16 +53,15 @@ export default function PrysmioPage() {
   const [teamSv, setTeamSv] = useState(0);
   const [user, setUser] = useState(null);
 
-  // AUTHENTIFICATION AUTOMATIQUE POUR SYNC
+// AUTHENTIFICATION AUTOMATIQUE SIMPLIFIÉE
   useEffect(() => {
     const initAuth = async () => {
       try {
-        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-          await signInWithCustomToken(auth, __initial_auth_token);
-        } else {
-          await signInAnonymously(auth);
-        }
-      } catch (err) { console.error("Erreur Auth:", err); }
+        // Sur ton Mac, on se connecte anonymement par défaut
+        await signInAnonymously(auth);
+      } catch (err) { 
+        console.error("Erreur Auth:", err); 
+      }
     };
     initAuth();
     const unsubscribe = onAuthStateChanged(auth, setUser);

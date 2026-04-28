@@ -1,29 +1,40 @@
 "use client";
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { initializeApp } from 'firebase/app';
+import { initializeApp, getApps } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
 import { getFirestore, doc, onSnapshot, setDoc } from 'firebase/firestore';
 
-// --- CONFIGURATION SUPABASE & FIREBASE (IDENTIFIANTS SITE) ---
+// --- CONFIGURATION SUPABASE ---
 const S_URL = "https://rbmzmduojlxdzfgmolly.supabase.co";
 const S_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJibXptZHVvamx4ZHpmZ21vbGx5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM4MTY3NDMsImV4cCI6MjA4OTM5Mjc0M30.plryXDY6786ct7TLIlh-DGWiCWi8OtQA9Te7LgsHz3E";
 
 const GLOBAL_BASE_COEFF = 0.915636;
 const LEAD_MIN_GSV_REQUIRED = 3000;
 const L2_UNLOCK_THRESHOLD = 500;
-const MAX_SV_LIMIT = 1000000;
 const MAX_SELL_LIMIT = 2500;
 const MAX_BUILD_LIMIT = 25000;
 
-// Initialisation Firebase pour l'authentification Subaru
-const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
+// --- INITIALISATION SÉCURISÉE POUR LE PUBLIC ET LE LOCAL ---
+const getFirebaseConfig = () => {
+    // 1. Cherche d'abord dans l'environnement système (Canvas)
+    if (typeof __firebase_config !== 'undefined') return JSON.parse(__firebase_config);
+    // 2. Cherche dans les variables d'environnement standard (Vercel/Local)
+    if (process.env.NEXT_PUBLIC_FIREBASE_CONFIG) return JSON.parse(process.env.NEXT_PUBLIC_FIREBASE_CONFIG);
+    // 3. Fallback vide
+    return null;
+};
+
+const firebaseConfig = getFirebaseConfig();
+const isFirebaseEnabled = firebaseConfig && firebaseConfig.apiKey;
+
+// Initialisation conditionnelle pour éviter l'erreur "invalid-api-key"
+const app = isFirebaseEnabled ? (getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0]) : null;
+const auth = app ? getAuth(app) : null;
+const db = app ? getFirestore(app) : null;
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'gains-2026-master';
 
-// --- Icônes SVG intégrées (Extraites de votre code d'origine) ---
+// --- Icônes SVG intégrées ---
 const Icons = {
     TrendingUp: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"></polyline><polyline points="16 7 22 7 22 13"></polyline></svg>,
     ShoppingBag: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z"></path><path d="M3 6h18"></path><path d="M16 10a4 4 0 0 1-8 0"></path></svg>,
@@ -39,7 +50,6 @@ const Icons = {
     CloudUpload: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.592"></path><path d="M12 12v9"></path><path d="m8 16 4-4 4 4"></path></svg>
 };
 
-// --- Composant VolumeInput (Fidèle à votre code HTML d'origine) ---
 const VolumeInput = ({ label, value, onChange, min = 0, max = 1000000, step = 1, colorClass = "text-indigo-600", disabled = false, lockMessage = "" }) => (
     <div className={`group p-6 rounded-[2.2rem] transition-all duration-300 border ${disabled ? 'bg-slate-100/50 border-slate-100 opacity-60' : 'bg-white border-slate-100 shadow-sm hover:shadow-lg'}`}>
         <div className="flex flex-col gap-4 mb-6">
@@ -89,7 +99,6 @@ export default function SimulateurGainsPage() {
     const [saving, setSaving] = useState(false);
     const [syncStatus, setSyncStatus] = useState(null);
 
-    // ÉTATS DES DONNÉES
     const [sellL1, setSellL1] = useState(0); 
     const [sellL2, setSellL2] = useState(0); 
     const [gsv, setGsv] = useState(0);
@@ -97,7 +106,6 @@ export default function SimulateurGainsPage() {
     const [orgVolume, setOrgVolume] = useState(0); 
     const [directBrVolume, setDirectBrVolume] = useState(0); 
 
-    // --- FONCTION RESET ---
     const handleReset = () => {
         setSellL1(0); setSellL2(0); setGsv(0); setNumLts(0);
         setOrgVolume(0); setDirectBrVolume(0); setActiveTab('sell');
@@ -106,6 +114,8 @@ export default function SimulateurGainsPage() {
     // --- INITIALISATION AUTH & SUPABASE ---
     useEffect(() => {
         setMounted(true);
+        if (!auth) return;
+
         const initAuth = async () => {
             try {
                 if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
@@ -113,7 +123,9 @@ export default function SimulateurGainsPage() {
                 } else {
                     await signInAnonymously(auth);
                 }
-            } catch (err) { console.error("Auth init error"); }
+            } catch (err) { 
+                console.warn("Auth status: Running in limited mode (Missing valid keys)"); 
+            }
         };
         initAuth();
 
@@ -121,30 +133,43 @@ export default function SimulateurGainsPage() {
             try {
                 const { createClient } = await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm');
                 setSupabase(createClient(S_URL, S_KEY));
-            } catch (e) { console.warn("Supabase init pending..."); }
+            } catch (e) { console.warn("Supabase local mode"); }
         };
         initSupabase();
 
-        const unsubscribe = onAuthStateChanged(auth, (u) => { if (u) setUser(u); });
+        const unsubscribe = onAuthStateChanged(auth, (u) => { 
+            setUser(u); 
+        });
         return () => unsubscribe();
     }, []);
 
-    // --- SYNC DONNÉES CLOUD ---
+    // --- SYNC DONNÉES CLOUD (Correction Permissions) ---
     useEffect(() => {
-        if (!user) return;
+        // RÈGLE 3 : On n'appelle Firestore QUE si l'utilisateur est authentifié
+        if (!user || !db) return;
+        
         const docRef = doc(db, 'artifacts', appId, 'users', user.uid, 'simulations', 'gains-current');
-        const unsub = onSnapshot(docRef, (docSnap) => {
-            if (docSnap.exists()) {
-                const d = docSnap.data();
-                setSellL1(d.sellL1 || 0); setSellL2(d.sellL2 || 0);
-                setGsv(d.gsv || 0); setNumLts(d.numLts || 0);
-                setOrgVolume(d.orgVolume || 0); setDirectBrVolume(d.directBrVolume || 0);
+        
+        const unsub = onSnapshot(docRef, 
+            (docSnap) => {
+                if (docSnap.exists()) {
+                    const d = docSnap.data();
+                    setSellL1(d.sellL1 || 0); 
+                    setSellL2(d.sellL2 || 0);
+                    setGsv(d.gsv || 0); 
+                    setNumLts(d.numLts || 0);
+                    setOrgVolume(d.orgVolume || 0); 
+                    setDirectBrVolume(d.directBrVolume || 0);
+                }
+            },
+            (err) => {
+                // Évite l'écran rouge de permission si l'auth met du temps à se propager
+                console.log("Firestore sync pending...");
             }
-        });
+        );
         return () => unsub();
     }, [user]);
 
-    // --- LOGIQUE CALCULS 2026 ---
     const stats = useMemo(() => {
         const bonusL1 = (sellL1 * GLOBAL_BASE_COEFF) * 0.05;
         const isL2Eligible = sellL1 >= L2_UNLOCK_THRESHOLD;
@@ -190,14 +215,17 @@ export default function SimulateurGainsPage() {
         };
     }, [sellL1, sellL2, gsv, numLts, orgVolume, directBrVolume]);
 
-    // --- SAUVEGARDE SUR COMPTE SITE ---
     const saveToCloud = async () => {
-        if (!user || !supabase) return;
+        if (!user || !db) return;
         setSaving(true);
         try {
-            const data = { sellL1, sellL2, gsv, numLts, orgVolume, directBrVolume, total_ht: stats.total, updatedAt: new Date().toISOString() };
+            const data = { 
+                sellL1, sellL2, gsv, numLts, orgVolume, directBrVolume, 
+                total_ht: stats.total, 
+                updatedAt: new Date().toISOString() 
+            };
             await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'simulations', 'gains-current'), data);
-            await supabase.from('simulations').insert([{ type: "GAINS_MASTER_2026", ...data }]);
+            if (supabase) await supabase.from('simulations').insert([{ type: "GAINS_MASTER_2026", ...data }]);
             setSyncStatus('success');
             setTimeout(() => setSyncStatus(null), 3000);
         } catch (err) { setSyncStatus('error'); }
@@ -209,8 +237,6 @@ export default function SimulateurGainsPage() {
     return (
         <div className="min-h-screen p-4 md:p-10 pb-24 text-slate-900 bg-slate-50 italic font-[900] uppercase antialiased">
             <div className="max-w-7xl mx-auto space-y-12">
-                
-                {/* HEADER (STRICT HTML D'ORIGINE) */}
                 <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-8">
                     <div className="flex items-center gap-5">
                         <div className="w-16 h-16 bg-slate-900 rounded-[1.5rem] flex items-center justify-center text-white shadow-2xl rotate-3">
@@ -223,7 +249,6 @@ export default function SimulateurGainsPage() {
                             </p>
                         </div>
                     </div>
-
                     <div className="flex items-center gap-5 w-full md:w-auto font-[900] italic uppercase">
                         <button onClick={handleReset} className="flex-1 md:flex-none flex items-center justify-center gap-3 px-8 py-5 bg-white text-rose-500 border-2 border-rose-50 rounded-[1.8rem] font-[900] text-[12px] uppercase shadow-sm hover:bg-rose-50 transition-all active:scale-95 italic">
                             <Icons.RotateCcw /> Reset
@@ -236,9 +261,7 @@ export default function SimulateurGainsPage() {
                 </header>
 
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-12">
-                    
                     <div className="lg:col-span-8 space-y-10">
-                        {/* TABS (STRICT HTML D'ORIGINE) */}
                         <nav className="flex bg-slate-200/50 p-2.5 rounded-[2.8rem] gap-2.5 shadow-inner italic font-black uppercase">
                             {[
                                 { id: 'sell', label: 'SELL', icon: Icons.ShoppingBag, color: 'text-emerald-600' },
@@ -257,7 +280,6 @@ export default function SimulateurGainsPage() {
                         </nav>
 
                         <main className="bg-white rounded-[4.5rem] shadow-2xl border border-slate-50 min-h-[600px] overflow-hidden italic font-[900] uppercase">
-                            
                             {activeTab === 'sell' && (
                                 <div className="p-10 md:p-16 space-y-14 animate-in fade-in duration-700 italic font-[900] uppercase">
                                     <div className="flex items-center gap-5"><div className="w-2.5 h-10 bg-emerald-500 rounded-full" /><h3 className="text-2xl font-[900] text-slate-800 uppercase italic">Commission SELL</h3></div>
@@ -318,7 +340,6 @@ export default function SimulateurGainsPage() {
                                             <span className="text-4xl font-[900] tracking-tighter leading-none italic">{(stats.leadGlobalBonus + stats.directBrBonus).toLocaleString('fr-FR', { minimumFractionDigits: 2 })}€</span>
                                         </div>
                                     </div>
-                                    
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-12 mt-12 italic uppercase font-[900]">
                                         <div className="space-y-6 p-10 bg-[#f8fafc]/50 border border-slate-100 rounded-[3.5rem] shadow-sm">
                                             <h5 className="text-[12px] font-[900] text-indigo-400 uppercase tracking-widest mb-8 text-center italic leading-none">Objectifs (LTSV)</h5>
@@ -349,7 +370,6 @@ export default function SimulateurGainsPage() {
                         </main>
                     </div>
 
-                    {/* BARRE LATÉRALE (STRICT HTML D'ORIGINE) */}
                     <aside className="lg:col-span-4 space-y-10 italic uppercase font-[900]">
                         <div className="sticky top-10 italic uppercase font-[900]">
                             <div className="bg-slate-950 rounded-[4.5rem] p-10 md:p-14 shadow-2xl text-white relative overflow-hidden border border-white/10 group">
@@ -384,8 +404,6 @@ export default function SimulateurGainsPage() {
                                 </div>
                                 <div className="absolute -top-1/2 -right-1/2 w-full h-full rounded-full blur-[220px] opacity-20 pointer-events-none transition-all duration-1000 animate-pulse" style={{ backgroundColor: stats.currentRank.hex }}></div>
                             </div>
-
-                            {/* LISTE RANGS (EN BAS SIDEBAR) */}
                             <div className="mt-12 bg-white rounded-[4rem] p-12 border border-slate-100 shadow-sm space-y-10 italic font-black uppercase">
                                 <h4 className="text-[10px] font-[900] text-slate-400 uppercase tracking-[0.45em] text-center italic underline underline-offset-8 decoration-slate-100 font-black uppercase italic">Progression des Rangs</h4>
                                 <div className="space-y-8 italic font-black uppercase">
@@ -403,7 +421,6 @@ export default function SimulateurGainsPage() {
                                     })}
                                 </div>
                             </div>
-                            
                             <div className="pt-10 italic font-black uppercase">
                                 <button onClick={saveToCloud} disabled={saving} className="w-full bg-slate-900 text-white rounded-[2rem] p-6 shadow-xl hover:bg-black transition-all flex items-center justify-center gap-4 italic font-black uppercase active:scale-95">
                                     {saving ? <RefreshCw className="animate-spin" /> : <Icons.CloudUpload />} {saving ? "Synchronisation..." : "Sauvegarder Cloud"}
@@ -418,11 +435,28 @@ export default function SimulateurGainsPage() {
                 .slider-original { -webkit-appearance: none; width: 100%; height: 8px; background: #e2e8f0; border-radius: 12px; outline: none; }
                 .slider-original::-webkit-slider-thumb { -webkit-appearance: none; height: 32px; width: 32px; border-radius: 50%; background: #ffffff; cursor: pointer; box-shadow: 0 4px 15px rgba(0,0,0,0.2); border: 3px solid currentColor; transition: transform 0.1s ease; }
                 .slider-original:active::-webkit-slider-thumb { transform: scale(1.1); }
-                .slider-pink { -webkit-appearance: none; width: 100%; height: 8px; background: #fce7f3; border-radius: 12px; outline: none; }
-                .slider-pink::-webkit-slider-thumb { -webkit-appearance: none; height: 32px; width: 32px; border-radius: 50%; background: #ffffff; border: 3px solid #f472b6; cursor: pointer; box-shadow: 0 4px 15px rgba(0,0,0,0.1); transition: transform 0.1s ease; }
                 input[type=number]::-webkit-inner-spin-button, input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
                 input[type=number] { -moz-appearance: textfield; }
             `}</style>
         </div>
+    );
+}
+
+function RefreshCw({ className }) {
+    return (
+        <svg 
+            xmlns="http://www.w3.org/2000/svg" 
+            width="24" height="24" 
+            viewBox="0 0 24 24" 
+            fill="none" stroke="currentColor" 
+            strokeWidth="2" strokeLinecap="round" 
+            strokeLinejoin="round" 
+            className={className}
+        >
+            <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
+            <path d="M21 3v5h-5" />
+            <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" />
+            <path d="M3 21v-5h5" />
+        </svg>
     );
 }

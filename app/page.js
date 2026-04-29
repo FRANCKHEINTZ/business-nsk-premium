@@ -17,7 +17,7 @@ import {
 const LEGAL_TEXTS = {
   MENTIONS_LEGALES: { 
     titre: "Mentions Légales", 
-    contenu: `ÉDITEUR DU SITE : Invest In Your Future\nEmail : contact@invest-future.com\nContact support : +33 6 87 69 49 82\n\nHÉBERGEMENT : Le site est hébergé par Vercel Inc. (San Francisco, USA).` 
+    contenu: `ÉDITEUR DU SITE : Invest In Your Future\nEmail : business.nsk.premium@gmail.com\nContact support : +33 6 87 69 49 82\n\nHÉBERGEMENT : Le site est hébergé par Vercel Inc. (San Francisco, USA).` 
   },
   REMBOURSEMENT: { 
     titre: "Politique de Remboursement", 
@@ -37,9 +37,9 @@ const S_URL = 'https://rbmzmduojlxdzfgmolly.supabase.co';
 const S_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJibXptZHVvamx4ZHpmZ21vbGx5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM4MTY3NDMsImV4cCI6MjA4OTM5Mjc0M30.plryXDY6786ct7TLIlh-DGWiCWi8OtQA9Te7LgsHz3E';
 
 const CHECKOUT_LINKS = {
-  STARTER: { mensuel: "https://business-nsk.lemonsqueezy.com/checkout/buy/ed733f72-4562-4e93-8594-a3bdd319f5b3", annuel: "https://business-nsk.lemonsqueezy.com/checkout/buy/3e40bab0-a707-429e-9424-fd0d6b0de81e" },
-  BUSINESS: { mensuel: "https://business-nsk.lemonsqueezy.com/checkout/buy/910988d0-26a5-4a5d-b4c7-a29dd3302b12", annuel: "https://business-nsk.lemonsqueezy.com/checkout/buy/2ad67cb8-485b-48a7-b089-1f13a4a871e8" },
-  PERFORMANCE: { mensuel: "https://business-nsk.lemonsqueezy.com/checkout/buy/7fdb7200-82ff-48c7-b28b-a69ed2a87dc3", annuel: "https://business-nsk.lemonsqueezy.com/checkout/buy/8b1ed304-f6a6-4b65-8f8d-fb1011109bad" }
+  STARTER: { mensuel: "https://business-nsk-premium.lemonsqueezy.com/checkout/buy/af165861-adfa-4e43-8ad5-393c0d9c8412", annuel: "https://business-nsk-premium.lemonsqueezy.com/checkout/buy/71e19837-18e6-4908-bd23-3e9f3411164d?enabled=1586774" },
+  BUSINESS: { mensuel: "https://business-nsk-premium.lemonsqueezy.com/checkout/buy/34533c75-e294-4f06-afd8-21724c19f52b?enabled=1586893", annuel: "https://business-nsk-premium.lemonsqueezy.com/checkout/buy/588c0773-beb2-4e72-b2bc-51136a11059a" },
+  PERFORMANCE: { mensuel: "https://business-nsk-premium.lemonsqueezy.com/checkout/buy/2f35a940-1b32-4cb6-a0a5-9bfb92e92c3e?enabled=1586912", annuel: "https://business-nsk-premium.lemonsqueezy.com/checkout/buy/e1929154-4465-445c-a2f8-21e686ffcf3c" }
 };
 
 const PACK_FEATURES = {

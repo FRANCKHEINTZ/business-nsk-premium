@@ -8,10 +8,10 @@ import {
 } from 'lucide-react';
 
 /**
- * ADR CLIENT - VERSION V119 (NAVIGATION APPS)
- * - FIX : Bouton "RETOUR MES APPS" pour éviter de repasser par le login.
- * - FIX : Synchronisation session Master améliorée.
- * - FIX : Icônes Lucide sécurisées pour éviter le crash de l'appli.
+ * ADR CLIENT - VERSION V123 (LOGIQUE DÉCALAGE ET VISIBILITÉ M+1)
+ * - FIX : Affichage du mois N+1 pour visualiser le crédit reçu.
+ * - FIX : Règle de calcul M -> M+1 validée.
+ * - NOMENCLATURE : "PRODUITS GRATUITS" pour l'utilisation des points.
  */
 
 const S_URL = "https://rbmzmduojlxdzfgmolly.supabase.co";
@@ -38,14 +38,11 @@ export default function App() {
 
   useEffect(() => { 
     setMounted(true); 
-    
-    // --- VÉRIFICATION DE LA SESSION NSK ---
     const savedEmail = localStorage.getItem('nsk_email');
     if (savedEmail) {
         setIsAuthenticated(true);
         setUserEmail(savedEmail);
     } else {
-        // Déblocage automatique pour vos tests sur mobile/iMac
         setIsAuthenticated(true);
         setUserEmail("analyse-technique@nsk.com");
     }
@@ -61,40 +58,81 @@ export default function App() {
 
   const handleGoDashboard = () => {
     if (typeof window !== 'undefined') {
-      // Redirige vers la racine où se trouve le tableau de bord
       window.location.replace(window.location.origin);
     }
   };
  
   useEffect(() => {
     if (!mounted) return;
-    let balance = 0;
+    
+    let runningWallet = 0; 
     let totalSVAccumulated = 0;
     let lastIdxWithData = -1;
     const newResults = [];
-    inputsOrder.forEach((v, i) => { if (parseFloat(v) > 0) lastIdxWithData = i; });
+    
+    // 1. Calculer les gains potentiels générés par chaque mois
+    let gainsGeneratedByMonth = Array(MOIS).fill(0);
+    inputsOrder.forEach((v, i) => { 
+        const val = parseFloat(v) || 0;
+        if (val > 0) {
+            lastIdxWithData = i;
+            const sv = val / COEFF;
+            const rate = (frequency === 'bimestriel') ? 0.10 : ((i + 1) >= 13 ? 0.30 : 0.20);
+            if (sv >= MIN_SV) {
+                gainsGeneratedByMonth[i] = Math.min(sv * rate, MAX_PTS_M);
+            }
+        }
+    });
 
+    // 2. Simulation du flux réel avec décalage strict : Le gain de M(i-1) est crédité en M(i)
     for (let i = 0; i < MOIS; i++) {
       const monthNum = i + 1;
       const valOrder = parseFloat(inputsOrder[i]) || 0;
       const sv = valOrder / COEFF;
-      totalSVAccumulated += sv;
-      const availableBefore = balance;
+      
+      // CRÉDIT REÇU = Points générés par la commande du MOIS PRÉCÉDENT
+      let creditReceived = (i > 0) ? gainsGeneratedByMonth[i-1] : 0;
+      
+      // On ajoute le crédit à la réserve utilisable
+      runningWallet += creditReceived;
+
+      // USAGE : Le client utilise ses produits gratuits (PRODUITS GRATUITS)
       let used = parseFloat(inputsUsed[i]) || 0;
-      if (used > availableBefore) used = availableBefore;
-      balance -= used;
-      let earned = 0;
-      let rate = 0;
-      if (valOrder > 0) {
-        rate = (frequency === 'bimestriel') ? 0.10 : (monthNum >= 13 ? 0.30 : 0.20);
-        if (sv >= MIN_SV) earned = Math.min(sv * rate, MAX_PTS_M);
+      if (used > runningWallet) used = runningWallet;
+      runningWallet -= used;
+
+      if (runningWallet > MAX_PTS_A) runningWallet = MAX_PTS_A;
+      if (runningWallet < 0) runningWallet = 0;
+
+      // Afficher la ligne si : il y a une commande OU s'il y a un crédit reçu OU si c'est le mois suivant la dernière commande
+      const isVisible = i <= lastIdxWithData || (i > 0 && i === lastIdxWithData + 1);
+
+      if (isVisible) {
+          totalSVAccumulated += sv;
+          newResults.push({ 
+              monthNum, 
+              valOrder, 
+              sv, 
+              earned: creditReceived, 
+              balance: runningWallet, 
+              showRow: true 
+          });
+      } else {
+          newResults.push({ monthNum, valOrder: 0, sv: 0, earned: 0, balance: 0, showRow: false });
       }
-      balance += earned;
-      if (balance > MAX_PTS_A) balance = MAX_PTS_A;
-      newResults.push({ monthNum, valOrder, sv, earned, rate, balance, availableBefore, showRow: i <= lastIdxWithData || (i === 0 && inputsOrder[0] === '') });
     }
+
     setResults(newResults);
-    setTotals({ pts: balance, euro: balance * 1.5931, totalSV: totalSVAccumulated }); 
+    
+    // Totaux du haut : Solde après la dernière ligne visible
+    const finalBalance = (lastIdxWithData >= 0) ? newResults[lastIdxWithData + 1]?.balance || newResults[lastIdxWithData].balance : 0;
+    
+    setTotals({ 
+        pts: finalBalance, 
+        euro: finalBalance * COEFF, 
+        totalSV: totalSVAccumulated 
+    }); 
+
   }, [inputsOrder, inputsUsed, frequency, mounted]);
 
   const saveToSupabase = async () => {
@@ -122,7 +160,7 @@ export default function App() {
     <div className="p-4 md:p-8 text-[#0f172a] bg-[#f8fafc] min-h-screen italic font-black uppercase font-sans antialiased">
       <div className="max-w-7xl mx-auto space-y-6">
         
-        {/* TOP BAR ACTION - FIX: RETOUR MES APPS ✅ */}
+        {/* TOP BAR ACTION */}
         <div className="flex justify-between items-center mb-2 px-2">
             <button onClick={handleGoDashboard} className="flex items-center gap-2 text-[10px] font-black text-blue-600 hover:text-blue-800 transition-all active:scale-95 uppercase italic group">
                 <LayoutGrid size={18} className="group-hover:rotate-90 transition-transform duration-500" /> RETOUR MES APPS
@@ -150,7 +188,7 @@ export default function App() {
             </div>
         </div>
 
-        {/* 3. CONTRÔLES (RYTHME) */}
+        {/* 3. CONTRÔLES */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-center">
             <div className="lg:col-span-8 bg-white p-2.5 rounded-[2.5rem] shadow-sm flex flex-col sm:flex-row gap-3 border border-slate-50">
                 <button onClick={() => setFrequency('mensuel')} className={`flex-1 py-5 rounded-[1.8rem] text-[10px] font-black italic uppercase transition-all ${frequency === 'mensuel' ? 'bg-[#2563eb] text-white shadow-xl' : 'text-slate-400 bg-transparent hover:bg-slate-50'}`}>MENSUEL (20-30%)</button>
@@ -166,13 +204,13 @@ export default function App() {
         {/* 4. COMPTEURS */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8 font-black uppercase italic">
             <div className="bg-[#0f172a] text-white rounded-[3rem] p-12 shadow-2xl relative overflow-hidden flex flex-col justify-center min-h-[220px] border-b-[8px] border-blue-600">
-                <span className="text-[9px] opacity-40 tracking-[0.3em] font-black mb-4 italic leading-none">SOLDE ACTUEL CAGNOTTE</span>
+                <span className="text-[9px] opacity-40 tracking-[0.3em] font-black mb-4 italic leading-none uppercase">POINTS DISPONIBLES SUR LE COMPTE</span>
                 <div className="text-7xl font-black italic tracking-tighter leading-none flex items-baseline gap-2">
                     {totals.pts.toFixed(2)} <span className="text-xl opacity-20 NOT-ITALIC font-sans font-black uppercase">PTS</span>
                 </div>
             </div>
             <div className="bg-white rounded-[3rem] p-12 shadow-sm border border-slate-50 relative overflow-hidden flex flex-col justify-center min-h-[220px]">
-                <span className="text-[9px] text-slate-300 tracking-[0.3em] font-black mb-4 italic leading-none uppercase">VALEUR SHOPPING RESTANTE</span>
+                <span className="text-[9px] text-slate-300 tracking-[0.3em] font-black mb-4 italic leading-none uppercase">VALEUR SHOPPING IMMÉDIATE</span>
                 <div className="text-7xl font-black text-emerald-500 italic tracking-tighter leading-none">{totals.euro.toFixed(2)} €</div>
                 <div className="absolute right-10 top-1/2 -translate-y-1/2 opacity-[0.03]"><BarChart3 size={100} className="text-emerald-500" /></div>
             </div>
@@ -181,7 +219,7 @@ export default function App() {
         {/* 5. TABLEAU DE FLUX */}
         <div className="bg-white rounded-[3.5rem] shadow-sm border border-slate-50 overflow-hidden font-black uppercase italic mt-4">
             <header className="px-10 py-8 flex justify-between items-center bg-white border-b border-slate-50">
-                <h3 className="text-[10px] text-slate-400 tracking-[0.3em] font-black uppercase italic leading-none">FLUX DE VOS POINTS PRODUITS</h3>
+                <h3 className="text-[10px] text-slate-400 tracking-[0.3em] font-black uppercase italic leading-none uppercase text-center">RÈGLE ADR : LES GAINS DU MOIS N SONT CRÉDITÉS AU MOIS N+1</h3>
                 <div className="flex items-center gap-2 px-6 py-3 bg-white border border-blue-100 text-blue-600 rounded-xl text-[8px] font-black tracking-widest italic uppercase">
                    <FileCode size={14} /> MODULE ANALYSE
                 </div>
@@ -191,14 +229,15 @@ export default function App() {
                     <thead className="bg-[#fcfdfe] text-slate-300 text-[8px] tracking-[0.3em] font-black uppercase italic">
                         <tr>
                             <th className="p-10 text-center uppercase">MOIS</th>
-                            <th className="p-10 uppercase">COMMANDE (€)</th>
-                            <th className="p-10 text-center uppercase text-blue-600 bg-blue-50/20">GAINS (+)</th>
+                            <th className="p-10 uppercase">MA COMMANDE (€)</th>
+                            <th className="p-10 uppercase text-orange-600 bg-orange-50/20 text-center">PRODUITS GRATUITS (PTS)</th>
+                            <th className="p-10 text-center uppercase text-blue-600 bg-blue-50/20">CRÉDIT REÇU (+)</th>
                             <th className="p-10 text-right uppercase bg-slate-50/30">SOLDE (=)</th>
                         </tr>
                     </thead>
                     <tbody className="text-slate-900 italic font-black">
                         {results.map((row, i) => (
-                          <tr key={i} className={`border-b border-slate-50 hover:bg-slate-50 transition-all`}>
+                          <tr key={i} className={`border-b border-slate-50 hover:bg-slate-50 transition-all ${!row.showRow && i > 0 ? 'opacity-20' : ''}`}>
                             <td className="p-10 font-black text-slate-200 text-4xl text-center italic">{row.monthNum}</td>
                             <td className="p-10 font-black">
                                 <div className="relative group">
@@ -206,11 +245,18 @@ export default function App() {
                                     <span className="absolute right-6 top-1/2 -translate-y-1/2 text-slate-200 font-black">€</span>
                                 </div>
                             </td>
+                            <td className="p-10 font-black bg-orange-50/5 text-center">
+                                {row.showRow ? (
+                                    <div className="relative group flex justify-center">
+                                        <input type="text" value={inputsUsed[i]} onChange={(e) => { const n = [...inputsUsed]; n[i] = e.target.value; setInputsUsed(n); }} placeholder="0.0" className="w-32 bg-white border border-orange-100 p-6 rounded-2xl font-black text-orange-600 outline-none text-xl italic text-center shadow-sm" />
+                                    </div>
+                                ) : '—'}
+                            </td>
                             <td className="p-10 text-center text-blue-600 text-3xl font-black italic bg-blue-50/5">
-                                {row.earned > 0 ? `+${row.earned.toFixed(2)}` : '—'}
+                                {row.showRow && row.earned > 0 ? `+${row.earned.toFixed(2)}` : '—'}
                             </td>
                             <td className="p-10 text-right font-black text-3xl tracking-tighter text-slate-950 italic bg-slate-50/10">
-                                {row.balance.toFixed(2)}
+                                {row.showRow ? row.balance.toFixed(2) : '—'}
                             </td>
                           </tr>
                         ))}

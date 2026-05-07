@@ -9,8 +9,8 @@ import {
 /**
  * PLANIFICATEUR DE RENTABILITÉ ADR - VERSION V122 PREMIUM
  * - DESIGN : Fidèle au modèle photo (Badges, Cartes, Tableau)
- * - CALCULS : Méthode stratégique (20/30%, Déduction prioritaire, Plafonds)
- * - INTÉGRATION : Redirection Lemon Squeezy intégrée pour l'activation
+ * - CALCULS : Méthode stratégique REPORT N+1 (Gain mois N disponible mois N+1)
+ * - INTÉGRATION : Redirection Lemon Squeezy & Sauvegarde Supabase
  * - MISE À JOUR : Correction du lien "RETOUR MES APPS" et affichage progressif
  */
 
@@ -62,7 +62,6 @@ export default function App() {
   // Redirection corrigée vers le portail des applications
   const handleGoDashboard = () => {
     if (typeof window !== 'undefined') {
-      // Redirige vers la racine du site (portail)
       window.location.replace(window.location.origin);
     }
   };
@@ -88,56 +87,66 @@ export default function App() {
     return lastIdx;
   }, [inputsOrder, inputsUsed]);
 
-  // --- MOTEUR DE CALCUL STRATÉGIQUE V122 ---
+  // --- MOTEUR DE CALCUL STRATÉGIQUE V122 AVEC REPORT N+1 ---
   const simulation = useMemo(() => {
-    let balance = 0;
+    let runningWallet = 0; // Réserve de points réelle (ce qui est acquis)
     const results = [];
     
     for (let i = 0; i < MOIS; i++) {
       const monthNum = i + 1;
       const isRepos = frequency === 'bimestriel' && monthNum % 2 === 0;
       
+      // 1. DISPONIBLE AU DÉBUT : Ce qui a été reporté du mois dernier
+      const startingPoints = runningWallet;
+      
+      // 2. GESTION DES DÉPENSES : Limitées à ce qui est déjà disponible
+      let requestedSpend = parseFloat(inputsUsed[i]) || 0;
+      let actualSpend = Math.min(requestedSpend, startingPoints);
+      
+      // 3. SOLDE AFFICHÉ SUR LA LIGNE : Disponible - Dépense (Le gain actuel n'arrive qu'au mois N+1)
+      const visibleBalance = startingPoints - actualSpend;
+
+      // 4. CALCUL DU GAIN GÉNÉRÉ PAR LA COMMANDE ACTUELLE
       const valOrder = parseFloat(inputsOrder[i]) || 0;
       const sv = valOrder / COEFF;
-      
-      const availableBefore = balance;
-      let used = parseFloat(inputsUsed[i]) || 0;
-      if (used > availableBefore) used = availableBefore;
-      
-      // 1. Déduction des dépenses PRIORITAIRE sur le solde
-      balance -= used;
-
-      let earned = 0;
+      let earnedThisMonth = 0;
       let rate = 0;
       if (valOrder > 0 && !isRepos) {
-        rate = (frequency === 'bimestriel') ? 0.10 : (monthNum >= 13 ? 0.30 : 0.20);
+        rate = (frequency === 'mensuel') ? (monthNum >= 13 ? 0.30 : 0.20) : 0.10;
         if (sv >= MIN_SV - 0.005) {
-          earned = Math.min(sv * rate, MAX_PTS_M);
+          earnedThisMonth = Math.min(sv * rate, MAX_PTS_M);
         }
       }
 
-      // 2. Ajout des nouveaux gains et Plafond Annuel
-      balance += earned;
-      if (balance > MAX_PTS_A) balance = MAX_PTS_A;
-      if (balance < 0) balance = 0;
+      // 5. REPORT POUR LE MOIS SUIVANT : On prépare le stock pour la prochaine itération
+      runningWallet = visibleBalance + earnedThisMonth;
+      if (runningWallet > MAX_PTS_A) runningWallet = MAX_PTS_A;
+      if (runningWallet < 0) runningWallet = 0;
 
-      const isVisible = i <= lastIdxWithData;
+      // Un mois est visible s'il y a des données ou s'il suit immédiatement une saisie (pour voir le report)
+      const isVisible = i <= lastIdxWithData + 1;
 
       results.push({ 
-        monthNum, valOrder, sv, earned, rate, balance, used, isRepos, isVisible
+        monthNum, valOrder, sv, earned: earnedThisMonth, rate, 
+        balance: visibleBalance, 
+        used: actualSpend, isRepos, isVisible,
+        nextMonthStock: runningWallet
       });
     }
     return results;
   }, [inputsOrder, inputsUsed, frequency, lastIdxWithData]);
 
   const totals = useMemo(() => {
-    const finalPts = lastIdxWithData >= 0 ? simulation[lastIdxWithData].balance : 0;
-    return { pts: finalPts, euro: finalPts * COEFF };
+    // La cagnotte affiche ce qui est réellement disponible à la fin de la saisie
+    const currentUsable = lastIdxWithData >= 0 ? simulation[lastIdxWithData].balance : 0;
+    return { pts: currentUsable, euro: currentUsable * COEFF };
   }, [simulation, lastIdxWithData]);
 
   // Sauvegarde Cloud avec redirection automatique Lemon Squeezy
   const saveToSupabase = async () => {
-    if (totals.pts > 0 && !supabase) {
+    // On vérifie le stock projeté pour déclencher le checkout si besoin
+    const projectedPts = lastIdxWithData >= 0 ? simulation[lastIdxWithData].nextMonthStock : 0;
+    if (projectedPts > 0 && !supabase) {
         openLemonCheckout();
         return;
     }
@@ -148,7 +157,7 @@ export default function App() {
         Email: userEmail,
         type_outil: "ADR SIMULATOR V122",
         rythme: frequency,
-        cagnotte: totals.pts,
+        cagnotte: projectedPts,
         timestamp: new Date().toISOString()
       }]);
       notify("PLAN RÉSEAU SAUVEGARDÉ !");
@@ -187,7 +196,7 @@ export default function App() {
                 <LayoutGrid size={16} strokeWidth={3} className="group-hover:rotate-90 transition-transform duration-500" />
                 RETOUR MES APPS
             </button>
-            <div className="flex gap-4">
+            <div className="flex gap-4 text-center">
                 <button onClick={saveToSupabase} className="p-4 px-8 rounded-2xl bg-[#3b82f6] text-white shadow-lg shadow-blue-100 active:scale-95 flex items-center gap-2 text-[10px] font-black tracking-widest uppercase">
                     <CloudUpload size={16} strokeWidth={3}/> SAUVEGARDER
                 </button>
@@ -198,11 +207,11 @@ export default function App() {
         </div>
 
         {/* HEADER & BADGES */}
-        <header className="bg-white rounded-[4rem] p-16 shadow-sm border border-slate-50 text-center space-y-12 text-center">
+        <header className="bg-white rounded-[4rem] p-16 shadow-sm border border-slate-50 text-center space-y-12">
             <h1 className="text-5xl md:text-7xl tracking-tighter leading-none uppercase italic font-black text-slate-950 text-center">
               RENTABILITÉ ADR BA & MEMBRES
             </h1>
-            <div className="flex flex-wrap justify-center gap-4 text-center">
+            <div className="flex flex-wrap justify-center gap-4 text-center text-center">
                 <div className="bg-[#eff6ff] px-8 py-3 rounded-full border border-blue-100 text-[#3b82f6] text-[10px] font-black italic shadow-sm uppercase tracking-wider">SEUIL : 50 SV MIN (~61,25 €)</div>
                 <div className="bg-[#ecfdf5] px-8 py-3 rounded-full border border-emerald-100 text-[#10b981] text-[10px] font-black italic shadow-sm uppercase tracking-wider">MAX MENSUEL : 75 PTS</div>
                 <div className="bg-[#0f172a] px-8 py-3 rounded-full text-white text-[10px] font-black italic shadow-sm uppercase tracking-[0.1em]">PLAFOND ANNUEL : 900 PTS</div>
@@ -210,7 +219,7 @@ export default function App() {
         </header>
 
         {/* SÉLECTEUR DE RYTHME */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 px-2">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 px-2 text-center">
             <button onClick={() => setFrequency('mensuel')} className={`p-10 rounded-[3.5rem] border-4 transition-all text-left relative overflow-hidden h-full ${frequency === 'mensuel' ? 'border-blue-500 bg-white shadow-2xl scale-[1.01]' : 'opacity-40 grayscale border-transparent bg-slate-100 hover:opacity-100 hover:grayscale-0'}`}>
                 <div className="flex justify-between items-center mb-6 text-left">
                   <h3 className="text-2xl tracking-tight uppercase font-black italic text-slate-950 text-left">RYTHME MENSUEL</h3>
@@ -223,7 +232,7 @@ export default function App() {
             <button onClick={() => setFrequency('bimestriel')} className={`p-10 rounded-[3.5rem] border-4 transition-all text-left relative overflow-hidden h-full ${frequency === 'bimestriel' ? 'border-slate-300 bg-white shadow-2xl scale-[1.01]' : 'opacity-40 grayscale border-transparent bg-slate-100 hover:opacity-100 hover:grayscale-0'}`}>
                 <div className="flex justify-between items-center mb-6 text-left">
                   <h3 className="text-2xl tracking-tight uppercase font-black italic text-slate-400 text-left">RYTHME BIMESTRIEL</h3>
-                  <span className="bg-slate-300 text-white px-5 py-2 rounded-xl text-[10px] font-black italic text-center text-center">10%</span>
+                  <span className="bg-slate-300 text-white px-5 py-2 rounded-xl text-[10px] font-black italic text-center">10%</span>
                 </div>
                 <p className="text-[11px] text-slate-400 normal-case font-bold leading-relaxed italic pr-16 text-left">Rythme espacé : taux fixe de 10% de retour produit sur toutes vos commandes validées mensuellement.</p>
                 {frequency === 'bimestriel' && <Check className="absolute bottom-8 right-10 text-slate-300" size={32} strokeWidth={4} />}
@@ -231,9 +240,9 @@ export default function App() {
         </div>
 
         {/* INDICATEURS DE RÉSULTATS */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-            <div className="bg-[#020617] text-white rounded-[4rem] p-16 shadow-2xl relative overflow-hidden border-b-[14px] border-blue-600 group text-left text-left text-left">
-                <span className="text-[10px] opacity-40 tracking-[0.4em] font-black uppercase italic leading-none text-left">CAGNOTTE POINTS BRAND AFFILIATE</span>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 text-center text-center">
+            <div className="bg-[#020617] text-white rounded-[4rem] p-16 shadow-2xl relative overflow-hidden border-b-[14px] border-blue-600 group text-left text-left">
+                <span className="text-[10px] opacity-40 tracking-[0.4em] font-black uppercase italic leading-none text-left">POINTS RÉELLEMENT DISPONIBLES</span>
                 <div className="text-8xl md:text-9xl mt-8 tracking-tighter leading-none font-black italic text-white flex items-baseline gap-4 text-left">
                   {totals.pts.toFixed(2)} 
                   <span className="text-2xl opacity-20 font-sans uppercase not-italic text-left">PTS</span>
@@ -242,8 +251,8 @@ export default function App() {
             </div>
             
             <div className="bg-white rounded-[4rem] p-16 shadow-xl border-2 border-slate-50 relative overflow-hidden text-left text-left text-left">
-                <span className="text-[10px] text-slate-300 tracking-[0.4em] font-black uppercase italic leading-none text-left text-left text-left text-left">VALEUR SHOPPING ESTIMÉE (HT)</span>
-                <div className="text-7xl md:text-9xl mt-8 text-[#38bdf8] tracking-tighter leading-none font-black italic flex items-baseline gap-4 text-left text-left text-left text-left">
+                <span className="text-[10px] text-slate-300 tracking-[0.4em] font-black uppercase italic leading-none text-left text-left">VALEUR SHOPPING RÉELLE (HT)</span>
+                <div className="text-7xl md:text-9xl mt-8 text-[#38bdf8] tracking-tighter leading-none font-black italic flex items-baseline gap-4 text-left text-left">
                   {totals.euro.toFixed(2)} €
                 </div>
                 <div className="absolute top-0 right-0 p-10 opacity-[0.02] text-slate-900">
@@ -254,48 +263,48 @@ export default function App() {
 
         {/* TABLEAU DE PLANIFICATION */}
         <div className="bg-white rounded-[4rem] md:rounded-[5rem] shadow-sm overflow-hidden border-2 border-slate-50 font-black italic uppercase text-center text-center">
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto text-center">
                 <table className="w-full text-left italic font-black uppercase text-center text-center">
                     <thead className="bg-slate-50/50 text-[10px] text-slate-300 tracking-[0.3em] font-black uppercase italic border-b border-slate-100 text-center text-center text-center text-center">
                         <tr>
                           <th className="p-10 text-center w-24">MOIS</th>
-                          <th className="p-10 text-center text-center text-center text-center">COMMANDE (€)</th>
-                          <th className="p-10 text-center text-center text-center text-center text-center text-center">TAUX (%)</th>
-                          <th className="p-10 text-center text-[#3b82f6] text-center text-center text-center text-center text-center">POINTS GAGNÉS</th>
-                          <th className="p-10 text-center text-[#f97316] text-center text-center text-center text-center text-center text-center">DÉPENSES (PTS)</th>
-                          <th className="p-10 text-right text-right text-right text-right text-right text-right text-right">SOLDE CUMULÉ</th>
+                          <th className="p-10 text-center text-center">COMMANDE (€)</th>
+                          <th className="p-10 text-center text-center text-center text-center">TAUX (%)</th>
+                          <th className="p-10 text-center text-[#3b82f6] text-center text-center">POINTS GAGNÉS</th>
+                          <th className="p-10 text-center text-[#f97316] text-center text-center">DÉPENSES (PTS)</th>
+                          <th className="p-10 text-right text-right text-right">SOLDE DISPONIBLE</th>
                         </tr>
                     </thead>
-                    <tbody className="divide-y-2 divide-slate-50 text-center text-center text-center">
+                    <tbody className="divide-y-2 divide-slate-50 text-center text-center">
                         {simulation.map((row, i) => (
                           <tr key={i} className={`transition-all duration-300 hover:bg-[#f8fafc] ${row.isRepos ? 'opacity-20 pointer-events-none' : ''}`}>
-                            <td className="p-8 text-6xl text-slate-100 text-center font-black leading-none italic text-center text-center text-center text-center">{row.monthNum}</td>
-                            <td className="p-8 text-center text-center text-center text-center text-center">
-                                <div className={`flex items-center gap-4 p-5 rounded-[2.2rem] border-2 transition-all mx-auto max-w-[240px] ${inputsOrder[i] !== '' ? (row.sv >= MIN_SV - 0.005 ? 'border-blue-500 bg-white shadow-xl' : 'border-red-400 bg-white') : 'border-slate-100 bg-[#f8fafc]'}`}>
+                            <td className="p-8 text-6xl text-slate-100 text-center font-black leading-none italic text-center">{row.monthNum}</td>
+                            <td className="p-8 text-center text-center">
+                                <div className={`flex items-center gap-4 p-5 rounded-[2.2rem] border-2 transition-all mx-auto max-w-[240px] ${inputsOrder[i] !== '' ? (row.sv >= MIN_SV - 0.005 ? 'border-blue-600 bg-white shadow-xl' : 'border-red-400 bg-white') : 'border-slate-100 bg-[#f8fafc]'}`}>
                                     <input 
                                       type="number" value={inputsOrder[i]} 
                                       onChange={(e) => { const n = [...inputsOrder]; n[i] = e.target.value; setInputsOrder(n); }} 
-                                      placeholder="0.00" className="w-full bg-transparent outline-none text-2xl font-black italic text-center text-slate-800 text-center text-center text-center" 
+                                      placeholder="0.00" className="w-full bg-transparent outline-none text-2xl font-black italic text-center text-slate-800 text-center text-center" 
                                     />
-                                    <span className="text-slate-200 text-xl font-black italic text-center text-center text-center text-center">€</span>
+                                    <span className="text-slate-200 text-xl font-black italic text-center text-center">€</span>
                                 </div>
                             </td>
-                            <td className="p-8 text-center text-center text-center text-center text-center text-center text-center">
+                            <td className="p-8 text-center text-center text-center">
                                 {(row.isVisible && row.valOrder > 0) ? (
-                                    <span className="text-slate-300 text-[10px] font-black italic text-center text-center text-center text-center">{(row.rate * 100).toFixed(0)}%</span>
+                                    <span className="text-slate-300 text-[10px] font-black italic text-center text-center">{(row.rate * 100).toFixed(0)}%</span>
                                 ) : null}
                             </td>
-                            <td className="p-8 text-center text-blue-500 text-4xl font-black italic leading-none text-center text-center text-center text-center text-center text-center text-center text-center">
+                            <td className="p-8 text-center text-blue-500 text-4xl font-black italic leading-none text-center text-center">
                               {row.isVisible ? (row.earned > 0 ? `+${row.earned.toFixed(1)}` : '—') : null}
                             </td>
-                            <td className="p-8 text-center text-center text-center text-center text-center text-center text-center text-center text-center">
+                            <td className="p-8 text-center text-center text-center">
                                 <input 
                                   type="number" value={inputsUsed[i]} 
                                   onChange={(e) => { const n = [...inputsUsed]; n[i] = e.target.value; setInputsUsed(n); }} 
-                                  placeholder="0" className="w-24 p-5 bg-[#f8fafc] border border-slate-100 rounded-[1.8rem] text-center text-orange-400 text-2xl font-black italic outline-none focus:border-orange-200 mx-auto text-center text-center text-center" 
+                                  placeholder="0" className="w-24 p-5 bg-[#f8fafc] border border-slate-100 rounded-[1.8rem] text-center text-orange-400 text-2xl font-black italic outline-none focus:border-orange-200 mx-auto text-center text-center" 
                                 />
                             </td>
-                            <td className="p-8 text-right text-4xl font-black tracking-tighter text-slate-950 italic leading-none text-right text-right text-right text-right text-right text-right text-right text-right">
+                            <td className="p-8 text-right text-4xl font-black tracking-tighter text-slate-950 italic leading-none text-right text-right">
                               {row.isVisible ? row.balance.toFixed(1) : (i === 0 ? "0.0" : null)}
                             </td>
                           </tr>
@@ -306,8 +315,8 @@ export default function App() {
         </div>
       </div>
       
-      <footer className="mt-20 py-16 opacity-20 text-center border-t border-slate-200 mx-6 md:mx-32 font-black italic uppercase text-center text-center text-center text-center text-center text-center text-center text-center">
-         <p className="text-[12px] tracking-[1em] text-center text-center text-center text-center text-center text-center text-center text-center">BUSINESS NSK PREMIUM • PLANIFICATEUR ADR V122</p>
+      <footer className="mt-20 py-16 opacity-20 text-center border-t border-slate-200 mx-6 md:mx-32 font-black italic uppercase text-center text-center">
+         <p className="text-[12px] tracking-[1em] text-center text-center">BUSINESS NSK PREMIUM • PLANIFICATEUR ADR V122</p>
       </footer>
     </div>
   );

@@ -15,6 +15,8 @@ export default function RootLayout({ children }) {
     <html lang="fr" suppressHydrationWarning>
       <head>
         <script src="https://cdn.tailwindcss.com"></script>
+        <meta property="og:image" content="https://business-nsk-premium.com/opengraph-image.png" />
+        <meta name="twitter:image" content="https://business-nsk-premium.com/opengraph-image.png" />
         <style dangerouslySetInnerHTML={{ __html: `
           @import url('https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,900;1,900&display=swap');
           body {

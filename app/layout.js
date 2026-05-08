@@ -15,8 +15,14 @@ export default function RootLayout({ children }) {
     <html lang="fr" suppressHydrationWarning>
       <head>
         <script src="https://cdn.tailwindcss.com"></script>
+
+         {/* CONFIGURATION WHATSAPP - NE PAS TOUCHER */}
+        <meta property="og:title" content="Business NSK Premium" />
+        <meta property="og:description" content="Accédez à votre espace Business NSK Premium" />
         <meta property="og:image" content="https://business-nsk-premium.com/opengraph-image.png" />
+        <meta property="og:type" content="website" />
         <meta name="twitter:image" content="https://business-nsk-premium.com/opengraph-image.png" />
+        <meta name="twitter:card" content="summary_large_image" />
         <style dangerouslySetInnerHTML={{ __html: `
           @import url('https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,900;1,900&display=swap');
           body {

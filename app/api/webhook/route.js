@@ -18,7 +18,8 @@ export async function POST(req) {
     }
 
     const payload = JSON.parse(rawBody);
-    // Nettoyage de l'email : tout en minuscules et sans espaces
+    
+    // On nettoie l'email reçu : tout en minuscules et on enlève les espaces
     const emailRecu = payload.data.attributes.user_email.toLowerCase().trim();
     const eventName = payload.meta.event_name;
     const variantId = payload.data.attributes.variant_id.toString(); 
@@ -28,11 +29,13 @@ export async function POST(req) {
       process.env.SUPABASE_SERVICE_ROLE_KEY
     );
 
-    console.log(`Webhook reçu pour ${emailRecu} | Event: ${eventName}`);
+    console.log(`[WEBHOOK] Événement: ${eventName} | Client: ${emailRecu} | Variant ID: ${variantId}`);
 
     if (eventName === 'subscription_created' || eventName === 'subscription_payment_success' || eventName === 'order_created') {
       
       let statutFinal = 'Gratuit';
+
+      // --- CONFIGURATION DES IDS RÉELS ---
       const idsStarter = ["1586709", "1586774"]; 
       const idsBusiness = ["1586893", "1586877"]; 
       const idsPerformance = ["1586912", "1586896"]; 
@@ -41,24 +44,31 @@ export async function POST(req) {
       else if (idsBusiness.includes(variantId)) statutFinal = 'Business';
       else if (idsPerformance.includes(variantId)) statutFinal = 'Performance';
 
+      console.log(`[WEBHOOK] Statut déterminé: ${statutFinal}`);
+
       // 2. MISE À JOUR DANS SUPABASE
-      // Utilisation de .ilike pour ignorer les majuscules dans la recherche
+      // On cherche la ligne où l'email correspond (sans tenir compte de la casse)
       const { error, data } = await supabase
-        .from('leads') // On utilise 'leads' en minuscules comme sur ton écran
+        .from('leads') // On utilise 'leads' en minuscules (vérifié sur votre écran)
         .update({ Statut: statutFinal })
-        .ilike('Email', emailRecu); 
+        .ilike('Email', emailRecu)
+        .select(); // On demande à voir le résultat
 
       if (error) {
-        console.error("Erreur Supabase:", error.message);
+        console.error("[SUPABASE ERROR]:", error.message);
         throw error;
       }
-      
-      console.log(`✅ Mise à jour réussie pour ${emailRecu} -> ${statutFinal}`);
+
+      if (data && data.length > 0) {
+        console.log(`✅ [SUCCÈS]: La ligne de ${emailRecu} a été mise à jour en ${statutFinal}`);
+      } else {
+        console.log(`⚠️ [ATTENTION]: Aucune ligne trouvée dans Supabase pour l'email: ${emailRecu}`);
+      }
     }
 
     return NextResponse.json({ status: 'success' }, { status: 200 });
   } catch (err) {
-    console.error("❌ Erreur Webhook:", err.message);
+    console.error("❌ [ERREUR GLOBALE]:", err.message);
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }

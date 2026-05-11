@@ -24,57 +24,53 @@ export async function POST(req) {
     const emailRecu = attributes?.user_email?.toLowerCase().trim() || attributes?.customer_email?.toLowerCase().trim();
     const eventName = payload?.meta?.event_name;
     const variantId = attributes?.variant_id?.toString() || ""; 
+    const variantName = attributes?.variant_name?.toLowerCase() || ""; // On récupère aussi le nom du pack
 
-    console.log(`[CHECK] Event: ${eventName} | Email: ${emailRecu} | Variant: ${variantId}`);
+    console.log(`[CHECK] Event: ${eventName} | Email: ${emailRecu} | Variant ID: ${variantId} | Name: ${variantName}`);
 
     if (!emailRecu) {
-      console.error("❌ Erreur : Aucun email trouvé dans le payload");
       return NextResponse.json({ error: "Email manquant" }, { status: 200 });
     }
 
-    // 3. VÉRIFICATION DES CLÉS SUPABASE (Variables d'environnement Vercel)
+    // 3. CONNEXION SUPABASE
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-    if (!supabaseUrl || !supabaseKey) {
-      console.error("❌ ERREUR CRITIQUE : Les clés NEXT_PUBLIC_SUPABASE_URL ou SUPABASE_SERVICE_ROLE_KEY sont absentes.");
-      return NextResponse.json({ error: "Configuration serveur incomplète" }, { status: 500 });
-    }
-
     const supabase = createClient(supabaseUrl, supabaseKey);
 
     // 4. LOGIQUE DE MISE À JOUR DU STATUT
     if (eventName === 'subscription_created' || eventName === 'subscription_payment_success' || eventName === 'order_created') {
       
-      let statutFinal = 'Gratuit';
+      let statutFinal = 'Gratuit'; // Statut par défaut si rien ne match
+
+      // Liste des IDs connus
       const idsStarter = ["1586709", "1586774"]; 
       const idsBusiness = ["1586893", "1586877"]; 
       const idsPerformance = ["1586912", "1586896"]; 
 
-      if (idsStarter.includes(variantId)) {
+      // DOUBLE VÉRIFICATION : Par ID ou par NOM du pack
+      if (idsStarter.includes(variantId) || variantName.includes('starter')) {
         statutFinal = 'Starter';
-      } else if (idsBusiness.includes(variantId)) {
+      } else if (idsBusiness.includes(variantId) || variantName.includes('business')) {
         statutFinal = 'Business';
-      } else if (idsPerformance.includes(variantId)) {
+      } else if (idsPerformance.includes(variantId) || variantName.includes('performance')) {
         statutFinal = 'Performance';
       }
 
-      // Mise à jour dans la table 'leads'
+      console.log(`[DÉCISION] Le client sera passé en statut : ${statutFinal}`);
+
+      // Mise à jour finale
       const { error, data } = await supabase
         .from('leads') 
         .update({ Statut: statutFinal })
         .ilike('Email', emailRecu)
         .select();
 
-      if (error) {
-        console.error("❌ Erreur Supabase:", error.message);
-        throw error;
-      }
+      if (error) throw error;
 
       if (data && data.length > 0) {
-        console.log(`✅ SUCCÈS : ${emailRecu} mis à jour en ${statutFinal}`);
+        console.log(`✅ SUCCÈS : ${emailRecu} est maintenant ${statutFinal}`);
       } else {
-        console.warn(`⚠️ Client ${emailRecu} non trouvé dans la table leads`);
+        console.warn(`⚠️ Client ${emailRecu} introuvable dans la table leads`);
       }
     }
 

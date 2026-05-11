@@ -34,6 +34,7 @@ const LEGAL_TEXTS = {
 
 const S_URL = 'https://rbmzmduojlxdzfgmolly.supabase.co';
 const S_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJibXptZHVvamx4ZHpmZ21vbGx5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM4MTY3NDMsImV4cCI6MjA4OTM5Mjc0M30.plryXDY6786ct7TLIlh-DGWiCWi8OtQA9Te7LgsHz3E';
+const ALLOWED_STATUSES = ['Starter', 'Business', 'Performance', 'Premium'];
 
 const CHECKOUT_LINKS = {
   STARTER: { 
@@ -68,15 +69,18 @@ export default function App() {
   const [notif, setNotif] = useState(null);
   const [legalView, setLegalView] = useState(null); 
 
-  const checkPaymentStatus = async (email) => {
+ const checkPaymentStatus = async (email) => {
     try {
       const res = await fetch(`${S_URL}/rest/v1/leads?Email=eq.${email.toLowerCase()}&select=Statut`, {
         headers: { 'apikey': S_KEY, 'Authorization': `Bearer ${S_KEY}` }
       });
       const data = await res.json();
-      return data[0]?.Statut === 'Premium';
+      const currentStatut = data[0]?.Statut;
+      // On autorise si le statut est dans la liste (Starter, Business, etc.)
+      return ALLOWED_STATUSES.includes(currentStatut);
     } catch (e) { return false; }
   };
+
 
   const setStatusPremium = async (email) => {
     try {
@@ -153,16 +157,19 @@ export default function App() {
     localStorage.setItem('nsk_pass', passV);
     setFirstName(fnameV); setLastName(lnameV); setLoginEmail(emailV);
     
-    // Vérification de sécurité immédiate
-    const alreadyPremium = await checkPaymentStatus(emailV);
+        // Vérification de sécurité immédiate
+    const hasAccess = await checkPaymentStatus(emailV);
     setNotif("CONNEXION RÉUSSIE");
     
     setTimeout(() => { 
-        if (alreadyPremium) { setView('dashboard'); } else { setView('packs'); }
+        if (hasAccess) { 
+            setView('dashboard'); 
+        } else { 
+            setView('packs'); 
+        }
         setLoading(false); 
         setNotif(null); 
     }, 800);
-  };
 
   const handleForgotPassword = () => {
     setNotif("FONCTIONNALITÉ INDISPONIBLE EN MODE DIRECT");

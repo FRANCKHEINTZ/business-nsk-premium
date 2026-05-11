@@ -7,6 +7,7 @@ export async function POST(req) {
     const rawBody = await req.text();
     const secret = process.env.LEMON_SQUEEZY_WEBHOOK_SECRET;
     
+    // 1. VÉRIFICATION DE SÉCURITÉ
     if (secret) {
       const hmac = crypto.createHmac('sha256', secret);
       const digest = Buffer.from(hmac.update(rawBody).digest('hex'), 'utf8');
@@ -17,8 +18,8 @@ export async function POST(req) {
     }
 
     const payload = JSON.parse(rawBody);
-    // On force l'email en minuscules pour être sûr de trouver le client
-    const email = payload.data.attributes.user_email.toLowerCase().trim();
+    // Nettoyage de l'email : tout en minuscules et sans espaces
+    const emailRecu = payload.data.attributes.user_email.toLowerCase().trim();
     const eventName = payload.meta.event_name;
     const variantId = payload.data.attributes.variant_id.toString(); 
 
@@ -26,6 +27,8 @@ export async function POST(req) {
       process.env.NEXT_PUBLIC_SUPABASE_URL,
       process.env.SUPABASE_SERVICE_ROLE_KEY
     );
+
+    console.log(`Webhook reçu pour ${emailRecu} | Event: ${eventName}`);
 
     if (eventName === 'subscription_created' || eventName === 'subscription_payment_success' || eventName === 'order_created') {
       
@@ -38,14 +41,19 @@ export async function POST(req) {
       else if (idsBusiness.includes(variantId)) statutFinal = 'Business';
       else if (idsPerformance.includes(variantId)) statutFinal = 'Performance';
 
-      // --- CORRECTION ICI : table 'leads' en minuscules ---
+      // 2. MISE À JOUR DANS SUPABASE
+      // Utilisation de .ilike pour ignorer les majuscules dans la recherche
       const { error, data } = await supabase
-        .from('leads') 
+        .from('leads') // On utilise 'leads' en minuscules comme sur ton écran
         .update({ Statut: statutFinal })
-        .ilike('Email', email); // ilike permet d'ignorer les majuscules/minuscules
+        .ilike('Email', emailRecu); 
 
-      if (error) throw error;
-      console.log(`✅ Statut ${statutFinal} activé pour ${email}`);
+      if (error) {
+        console.error("Erreur Supabase:", error.message);
+        throw error;
+      }
+      
+      console.log(`✅ Mise à jour réussie pour ${emailRecu} -> ${statutFinal}`);
     }
 
     return NextResponse.json({ status: 'success' }, { status: 200 });

@@ -19,23 +19,23 @@ export async function POST(req) {
 
     const payload = JSON.parse(rawBody);
     
-    // On nettoie l'email reçu : tout en minuscules et on enlève les espaces
-    const emailRecu = payload.data.attributes.user_email.toLowerCase().trim();
+    // Récupération de l'email avec sécurité maximale (on cherche dans deux endroits possibles du JSON)
+    const emailRecuRaw = payload.data.attributes.user_email || payload.data.attributes.customer_email || "";
+    const emailRecu = emailRecuRaw.toLowerCase().trim();
+    
     const eventName = payload.meta.event_name;
-    const variantId = payload.data.attributes.variant_id.toString(); 
+    const variantId = payload.data.attributes.variant_id?.toString() || ""; 
 
     const supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL,
       process.env.SUPABASE_SERVICE_ROLE_KEY
     );
 
-    console.log(`[WEBHOOK] Événement: ${eventName} | Client: ${emailRecu} | Variant ID: ${variantId}`);
+    console.log(`[LOG] Webhook: ${eventName} | Email Nettoyé: "${emailRecu}" | ID: ${variantId}`);
 
     if (eventName === 'subscription_created' || eventName === 'subscription_payment_success' || eventName === 'order_created') {
       
       let statutFinal = 'Gratuit';
-
-      // --- CONFIGURATION DES IDS RÉELS ---
       const idsStarter = ["1586709", "1586774"]; 
       const idsBusiness = ["1586893", "1586877"]; 
       const idsPerformance = ["1586912", "1586896"]; 
@@ -44,31 +44,32 @@ export async function POST(req) {
       else if (idsBusiness.includes(variantId)) statutFinal = 'Business';
       else if (idsPerformance.includes(variantId)) statutFinal = 'Performance';
 
-      console.log(`[WEBHOOK] Statut déterminé: ${statutFinal}`);
+      console.log(`[LOG] Tentative de mise à jour -> Statut: ${statutFinal}`);
 
       // 2. MISE À JOUR DANS SUPABASE
-      // On cherche la ligne où l'email correspond (sans tenir compte de la casse)
+      // On utilise 'ilike' qui est beaucoup plus puissant pour trouver l'email exact
       const { error, data } = await supabase
-        .from('leads') // On utilise 'leads' en minuscules (vérifié sur votre écran)
+        .from('leads') 
         .update({ Statut: statutFinal })
         .ilike('Email', emailRecu)
-        .select(); // On demande à voir le résultat
+        .select();
 
       if (error) {
-        console.error("[SUPABASE ERROR]:", error.message);
+        console.error("[ERREUR SUPABASE]:", error.message);
         throw error;
       }
 
       if (data && data.length > 0) {
-        console.log(`✅ [SUCCÈS]: La ligne de ${emailRecu} a été mise à jour en ${statutFinal}`);
+        console.log(`✅ [SUCCÈS]: ${emailRecu} est passé en ${statutFinal} (Ligne ID: ${data[0].id})`);
       } else {
-        console.log(`⚠️ [ATTENTION]: Aucune ligne trouvée dans Supabase pour l'email: ${emailRecu}`);
+        // C'est ici que ça se joue : si on arrive ici, l'email n'existe pas dans Supabase sous cette forme
+        console.error(`⚠️ [ALERTE]: Aucune ligne trouvée pour l'email "${emailRecu}". Vérifiez les espaces dans votre table Supabase.`);
       }
     }
 
     return NextResponse.json({ status: 'success' }, { status: 200 });
   } catch (err) {
-    console.error("❌ [ERREUR GLOBALE]:", err.message);
+    console.error("❌ [ERREUR CRITIQUE]:", err.message);
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }

@@ -7,7 +7,7 @@ export async function POST(req) {
     const rawBody = await req.text();
     const secret = process.env.LEMON_SQUEEZY_WEBHOOK_SECRET;
     
-    // 1. SÉCURITÉ : On vérifie que c'est bien Lemon Squeezy qui parle
+    // 1. SÉCURITÉ
     if (secret) {
       const hmac = crypto.createHmac('sha256', secret);
       const digest = Buffer.from(hmac.update(rawBody).digest('hex'), 'utf8');
@@ -19,7 +19,7 @@ export async function POST(req) {
 
     const payload = JSON.parse(rawBody);
     
-    // NETTOYAGE EXTRÊME DE L'EMAIL (Supprime espaces et majuscules)
+    // NETTOYAGE EXTRÊME : on récupère l'email et on enlève tout (espaces, majuscules)
     const emailRecu = payload.data.attributes.user_email.toLowerCase().trim();
     const eventName = payload.meta.event_name;
     const variantId = payload.data.attributes.variant_id.toString(); 
@@ -29,7 +29,8 @@ export async function POST(req) {
       process.env.SUPABASE_SERVICE_ROLE_KEY
     );
 
-    // 2. LOGIQUE DE DÉCISION DU PACK
+    console.log(`[CHECK] Réception : ${eventName} | Email : ${emailRecu} | Pack : ${variantId}`);
+
     if (eventName === 'subscription_created' || eventName === 'subscription_payment_success' || eventName === 'order_created') {
       
       let statutFinal = 'Gratuit';
@@ -41,27 +42,27 @@ export async function POST(req) {
       else if (idsBusiness.includes(variantId)) statutFinal = 'Business';
       else if (idsPerformance.includes(variantId)) statutFinal = 'Performance';
 
-      // 3. MISE À JOUR AUTOMATIQUE DANS SUPABASE
-      // ilike('Email', emailRecu) permet de trouver "Valerie" même si on cherche "valerie"
+      // 2. MISE À JOUR "FORCE BRUTE"
+      // On cherche l'email dans la table 'leads' (minuscule) et la colonne 'Email'
       const { error, data } = await supabase
-        .from('leads') // Vérifié sur ta capture : minuscule
+        .from('leads') 
         .update({ Statut: statutFinal })
-        .ilike('Email', emailRecu) 
+        .ilike('Email', emailRecu) // .ilike ignore les majuscules/minuscules de Supabase
         .select();
 
       if (error) throw error;
 
-      // Si l'email n'existait pas encore, on peut même décider de le créer (Optionnel)
-      if (!data || data.length === 0) {
-        console.log(`⚠️ Client ${emailRecu} non trouvé pour mise à jour.`);
+      if (data && data.length > 0) {
+        console.log(`✅ OUI ! ${emailRecu} est maintenant ${statutFinal}`);
       } else {
-        console.log(`✅ SUCCÈS : ${emailRecu} est passé en ${statutFinal}`);
+        // SI ÇA NE MARCHE TOUJOURS PAS : On cherche si l'utilisateur existe sous un autre nom
+        console.error(`❌ INTROUVABLE : L'email "${emailRecu}" n'est pas reconnu dans Supabase.`);
       }
     }
 
     return NextResponse.json({ status: 'success' }, { status: 200 });
   } catch (err) {
-    console.error("❌ ERREUR WEBHOOK :", err.message);
+    console.error("❌ ERREUR :", err.message);
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }

@@ -7,7 +7,7 @@ export async function POST(req) {
     const rawBody = await req.text();
     const secret = process.env.LEMON_SQUEEZY_WEBHOOK_SECRET;
     
-    // 1. SÉCURITÉ
+    // 1. SÉCURITÉ DE SIGNATURE
     if (secret) {
       const hmac = crypto.createHmac('sha256', secret);
       const digest = Buffer.from(hmac.update(rawBody).digest('hex'), 'utf8');
@@ -19,18 +19,31 @@ export async function POST(req) {
 
     const payload = JSON.parse(rawBody);
     
-    // NETTOYAGE EXTRÊME : on récupère l'email et on enlève tout (espaces, majuscules)
-    const emailRecu = payload.data.attributes.user_email.toLowerCase().trim();
-    const eventName = payload.meta.event_name;
-    const variantId = payload.data.attributes.variant_id.toString(); 
+    // 2. EXTRACTION SÉCURISÉE DES DONNÉES
+    const attributes = payload?.data?.attributes;
+    const emailRecu = attributes?.user_email?.toLowerCase().trim() || attributes?.customer_email?.toLowerCase().trim();
+    const eventName = payload?.meta?.event_name;
+    const variantId = attributes?.variant_id?.toString() || ""; 
 
-    const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL,
-      process.env.SUPABASE_SERVICE_ROLE_KEY
-    );
+    console.log(`[CHECK] Event: ${eventName} | Email: ${emailRecu} | Variant: ${variantId}`);
 
-    console.log(`[CHECK] Réception : ${eventName} | Email : ${emailRecu} | Pack : ${variantId}`);
+    if (!emailRecu) {
+      console.error("❌ Erreur : Aucun email trouvé dans le payload");
+      return NextResponse.json({ error: "Email manquant" }, { status: 200 });
+    }
 
+    // 3. VÉRIFICATION DES CLÉS SUPABASE (Variables d'environnement Vercel)
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+    if (!supabaseUrl || !supabaseKey) {
+      console.error("❌ ERREUR CRITIQUE : Les clés NEXT_PUBLIC_SUPABASE_URL ou SUPABASE_SERVICE_ROLE_KEY sont absentes.");
+      return NextResponse.json({ error: "Configuration serveur incomplète" }, { status: 500 });
+    }
+
+    const supabase = createClient(supabaseUrl, supabaseKey);
+
+    // 4. LOGIQUE DE MISE À JOUR DU STATUT
     if (eventName === 'subscription_created' || eventName === 'subscription_payment_success' || eventName === 'order_created') {
       
       let statutFinal = 'Gratuit';
@@ -38,31 +51,36 @@ export async function POST(req) {
       const idsBusiness = ["1586893", "1586877"]; 
       const idsPerformance = ["1586912", "1586896"]; 
 
-      if (idsStarter.includes(variantId)) statutFinal = 'Starter';
-      else if (idsBusiness.includes(variantId)) statutFinal = 'Business';
-      else if (idsPerformance.includes(variantId)) statutFinal = 'Performance';
+      if (idsStarter.includes(variantId)) {
+        statutFinal = 'Starter';
+      } else if (idsBusiness.includes(variantId)) {
+        statutFinal = 'Business';
+      } else if (idsPerformance.includes(variantId)) {
+        statutFinal = 'Performance';
+      }
 
-      // 2. MISE À JOUR "FORCE BRUTE"
-      // On cherche l'email dans la table 'leads' (minuscule) et la colonne 'Email'
+      // Mise à jour dans la table 'leads'
       const { error, data } = await supabase
         .from('leads') 
         .update({ Statut: statutFinal })
-        .ilike('Email', emailRecu) // .ilike ignore les majuscules/minuscules de Supabase
+        .ilike('Email', emailRecu)
         .select();
 
-      if (error) throw error;
+      if (error) {
+        console.error("❌ Erreur Supabase:", error.message);
+        throw error;
+      }
 
       if (data && data.length > 0) {
-        console.log(`✅ OUI ! ${emailRecu} est maintenant ${statutFinal}`);
+        console.log(`✅ SUCCÈS : ${emailRecu} mis à jour en ${statutFinal}`);
       } else {
-        // SI ÇA NE MARCHE TOUJOURS PAS : On cherche si l'utilisateur existe sous un autre nom
-        console.error(`❌ INTROUVABLE : L'email "${emailRecu}" n'est pas reconnu dans Supabase.`);
+        console.warn(`⚠️ Client ${emailRecu} non trouvé dans la table leads`);
       }
     }
 
     return NextResponse.json({ status: 'success' }, { status: 200 });
   } catch (err) {
-    console.error("❌ ERREUR :", err.message);
+    console.error("❌ ERREUR GLOBALE :", err.message);
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }

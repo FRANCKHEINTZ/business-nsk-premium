@@ -19,7 +19,7 @@ export async function POST(req) {
 
     const payload = JSON.parse(rawBody);
     
-    // Récupération de l'email avec sécurité maximale (on cherche dans deux endroits possibles du JSON)
+    // Récupération et nettoyage de l'email
     const emailRecuRaw = payload.data.attributes.user_email || payload.data.attributes.customer_email || "";
     const emailRecu = emailRecuRaw.toLowerCase().trim();
     
@@ -47,7 +47,7 @@ export async function POST(req) {
       console.log(`[LOG] Tentative de mise à jour -> Statut: ${statutFinal}`);
 
       // 2. MISE À JOUR DANS SUPABASE
-      // On utilise 'ilike' qui est beaucoup plus puissant pour trouver l'email exact
+      // On utilise .ilike pour la colonne 'Email' et on cible la table 'leads'
       const { error, data } = await supabase
         .from('leads') 
         .update({ Statut: statutFinal })
@@ -62,8 +62,12 @@ export async function POST(req) {
       if (data && data.length > 0) {
         console.log(`✅ [SUCCÈS]: ${emailRecu} est passé en ${statutFinal} (Ligne ID: ${data[0].id})`);
       } else {
-        // C'est ici que ça se joue : si on arrive ici, l'email n'existe pas dans Supabase sous cette forme
-        console.error(`⚠️ [ALERTE]: Aucune ligne trouvée pour l'email "${emailRecu}". Vérifiez les espaces dans votre table Supabase.`);
+        // Diagnostic : Si on arrive ici, l'email envoyé par Lemon Squeezy n'existe pas dans la colonne Email de Supabase
+        console.error(`⚠️ [ALERTE]: Aucune ligne trouvée pour l'email "${emailRecu}".`);
+        
+        // Tentative de secours : on cherche si l'email existe quand même sans filtre strict
+        const { data: search } = await supabase.from('leads').select('Email').ilike('Email', emailRecu);
+        console.log(`[DIAGNOSTIC] Recherche simple pour "${emailRecu}": ${search?.length > 0 ? "Trouvé" : "Non trouvé dans la table"}`);
       }
     }
 

@@ -16,7 +16,7 @@ import {
 const LEGAL_TEXTS = {
   MENTIONS_LEGALES: { 
     titre: "Mentions Légales", 
-    contenu: `ÉDITEUR DU SITE : Invest In Your Future\nEmail : business.nsk.premium@gmail.com\nContact support : +33 6 87 69 49 82\n\nHÉBERGEMENT : Le site est hébergé par Vercel Inc. (San Francisco, USA).` 
+    contenu: `ÉDITEUR DU SITE : Invest In Your Future\nContact : business.nsk.premium@gmail.com\nHÉBERGEMENT : Le site est hébergé par Vercel Inc. (San Francisco, USA).` 
   },
   REMBOURSEMENT: { 
     titre: "Politique de Remboursement", 

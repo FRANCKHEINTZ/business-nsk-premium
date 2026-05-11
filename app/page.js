@@ -125,7 +125,7 @@ export default function App() {
     init();
   }, []);
 
-  const handleLogin = async (e) => {
+const handleLogin = async (e) => {
     e.preventDefault();
     setLoading(true);
 
@@ -157,7 +157,7 @@ export default function App() {
     localStorage.setItem('nsk_pass', passV);
     setFirstName(fnameV); setLastName(lnameV); setLoginEmail(emailV);
     
-        // Vérification de sécurité immédiate
+    // Vérification de sécurité pour tous les packs
     const hasAccess = await checkPaymentStatus(emailV);
     setNotif("CONNEXION RÉUSSIE");
     
@@ -170,6 +170,7 @@ export default function App() {
         setLoading(false); 
         setNotif(null); 
     }, 800);
+  };
 
   const handleForgotPassword = () => {
     setNotif("FONCTIONNALITÉ INDISPONIBLE EN MODE DIRECT");

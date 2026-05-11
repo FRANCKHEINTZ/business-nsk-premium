@@ -7,7 +7,7 @@ export async function POST(req) {
     const rawBody = await req.text();
     const secret = process.env.LEMON_SQUEEZY_WEBHOOK_SECRET;
     
-    // 1. VÉRIFICATION DE SÉCURITÉ
+    // 1. SÉCURITÉ : On vérifie que c'est bien Lemon Squeezy qui parle
     if (secret) {
       const hmac = crypto.createHmac('sha256', secret);
       const digest = Buffer.from(hmac.update(rawBody).digest('hex'), 'utf8');
@@ -19,20 +19,17 @@ export async function POST(req) {
 
     const payload = JSON.parse(rawBody);
     
-    // Récupération et nettoyage de l'email
-    const emailRecuRaw = payload.data.attributes.user_email || payload.data.attributes.customer_email || "";
-    const emailRecu = emailRecuRaw.toLowerCase().trim();
-    
+    // NETTOYAGE EXTRÊME DE L'EMAIL (Supprime espaces et majuscules)
+    const emailRecu = payload.data.attributes.user_email.toLowerCase().trim();
     const eventName = payload.meta.event_name;
-    const variantId = payload.data.attributes.variant_id?.toString() || ""; 
+    const variantId = payload.data.attributes.variant_id.toString(); 
 
     const supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL,
       process.env.SUPABASE_SERVICE_ROLE_KEY
     );
 
-    console.log(`[LOG] Webhook: ${eventName} | Email Nettoyé: "${emailRecu}" | ID: ${variantId}`);
-
+    // 2. LOGIQUE DE DÉCISION DU PACK
     if (eventName === 'subscription_created' || eventName === 'subscription_payment_success' || eventName === 'order_created') {
       
       let statutFinal = 'Gratuit';
@@ -44,36 +41,27 @@ export async function POST(req) {
       else if (idsBusiness.includes(variantId)) statutFinal = 'Business';
       else if (idsPerformance.includes(variantId)) statutFinal = 'Performance';
 
-      console.log(`[LOG] Tentative de mise à jour -> Statut: ${statutFinal}`);
-
-      // 2. MISE À JOUR DANS SUPABASE
-      // On utilise .ilike pour la colonne 'Email' et on cible la table 'leads'
+      // 3. MISE À JOUR AUTOMATIQUE DANS SUPABASE
+      // ilike('Email', emailRecu) permet de trouver "Valerie" même si on cherche "valerie"
       const { error, data } = await supabase
-        .from('leads') 
+        .from('leads') // Vérifié sur ta capture : minuscule
         .update({ Statut: statutFinal })
-        .ilike('Email', emailRecu)
+        .ilike('Email', emailRecu) 
         .select();
 
-      if (error) {
-        console.error("[ERREUR SUPABASE]:", error.message);
-        throw error;
-      }
+      if (error) throw error;
 
-      if (data && data.length > 0) {
-        console.log(`✅ [SUCCÈS]: ${emailRecu} est passé en ${statutFinal} (Ligne ID: ${data[0].id})`);
+      // Si l'email n'existait pas encore, on peut même décider de le créer (Optionnel)
+      if (!data || data.length === 0) {
+        console.log(`⚠️ Client ${emailRecu} non trouvé pour mise à jour.`);
       } else {
-        // Diagnostic : Si on arrive ici, l'email envoyé par Lemon Squeezy n'existe pas dans la colonne Email de Supabase
-        console.error(`⚠️ [ALERTE]: Aucune ligne trouvée pour l'email "${emailRecu}".`);
-        
-        // Tentative de secours : on cherche si l'email existe quand même sans filtre strict
-        const { data: search } = await supabase.from('leads').select('Email').ilike('Email', emailRecu);
-        console.log(`[DIAGNOSTIC] Recherche simple pour "${emailRecu}": ${search?.length > 0 ? "Trouvé" : "Non trouvé dans la table"}`);
+        console.log(`✅ SUCCÈS : ${emailRecu} est passé en ${statutFinal}`);
       }
     }
 
     return NextResponse.json({ status: 'success' }, { status: 200 });
   } catch (err) {
-    console.error("❌ [ERREUR CRITIQUE]:", err.message);
+    console.error("❌ ERREUR WEBHOOK :", err.message);
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
